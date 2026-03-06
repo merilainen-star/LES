@@ -89,173 +89,19 @@
     display: block !important;
 }
 
-/* --- COMPACT LAYOUT STYLES --- */
-
-/* 1. Header Compactness */
-/* Force header elements to be smaller */
-body header.fixed {
-    height: auto !important;
-    min-height: 80px !important;
-    /* Reduced from ~130px */
+/* Hover-reveal copy button on search/category list pages */
+.lekolar-hover-copy {
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease;
 }
 
-body .header-bottom {
-    /* display: none !important; - Reverted: this hides the main navigation */
-    padding-top: 0 !important;
-    padding-bottom: 0 !important;
-    min-height: 30px !important;
+.product-item:hover .lekolar-hover-copy,
+.category-product:hover .lekolar-hover-copy,
+.product-list-item:hover .lekolar-hover-copy,
+article:hover .lekolar-hover-copy {
+    opacity: 1;
+    pointer-events: auto;
 }
 
-body header .logo img {
-    max-height: 40px !important;
-    /* Smaller logo */
-    width: auto !important;
-}
-
-body header .header-middle {
-    padding-top: 5px !important;
-    padding-bottom: 5px !important;
-    height: auto !important;
-    min-height: 60px !important;
-}
-
-/* 3. Search Title Compactness */
-h1#counterHeader {
-    margin-top: 5px !important;
-    margin-bottom: 0px !important;
-    /* Reduced to 0 */
-    font-size: 1.5rem !important;
-    line-height: 1.2 !important;
-    padding-bottom: 0 !important;
-}
-
-/* Adjust main wrapper padding to match new sticky header height */
-body .wrapper.main {
-    padding-top: 100px !important;
-}
-
-/* 4. Filter Panel / Tabs Compactness */
-/* Hide ALL tabs and container - Aggressive targeting */
-.search-filter-panel,
-.search-filter-panel.mobile,
-nav.js-searchNavigation,
-nav.main-search-nav,
-.main-search-nav,
-.mobileDisplay.js-searchNavigation,
-/* Target space-separated classes seen in user screenshot */
-.search.filter.panel,
-.show.desktop.search.filter.panel.mobile,
-.show.desktop.search.filter.panel,
-/* Target element with specific inline style if possible, or broad class combo */
-.show.desktop.left.align.block+div {
-    display: none !important;
-    height: 0 !important;
-    margin: 0 !important;
-    padding: 0 !important;
-    border: none !important;
-}
-
-/* Ensure the filter bar below moves up - Remove margin completely */
-.facet-list {
-    margin-top: 0px !important;
-}
-
-
-/* 5. Product Grid Compactness */
-.product-item,
-.category-product {
-    padding: 10px !important;
-    /* Reduced internal padding */
-    margin-bottom: 10px !important;
-}
-
-.product-item .product-image,
-.category-product .product-image {
-    margin-bottom: 5px !important;
-}
-
-/* Compact the buy/price section */
-.product-info .buy-info {
-    margin-top: 5px !important;
-}
-
-/* Reduce standard content padding if wrapper exists */
-.category-content {
-    padding-top: 0 !important;
-}
-
-/* 6. Alert Banner Compactness (if visible) */
-.message-container {
-    padding: 5px !important;
-    min-height: auto !important;
-}
-
-/* 7. Hide ALL tabs (Tuotteet, Vinkkejä, Sisältö) and the container */
-.search-filter-panel.mobile,
-nav.js-searchNavigation {
-    display: none !important;
-}
-
-/* Ensure the filter bar below moves up */
-.facet-list {
-    margin-top: 10px !important;
-}
-
-/* 8. Compact Search Result Container */
-/* The .search-result container has a large margin-top (~120px) pushing content down */
-.search-result,
-.js-searchResults {
-    margin-top: 0px !important;
-    padding-top: 0px !important;
-}
-
-/* 9. Fix .category-content negative top offset leaving dead space */
-.category-content {
-    top: 0 !important;
-    position: relative !important;
-    margin-top: 0 !important;
-    margin-bottom: 0 !important;
-}
-
-/* 10. Compact the facet/filter bar */
-.js-facet-original.facet-filter,
-.facet-filter.fixed,
-.facet-filter {
-    margin-top: 0px !important;
-    padding-top: 5px !important;
-    padding-bottom: 5px !important;
-}
-
-/* 11. Compact product-list-header (breadcrumbs + count) */
-.product-list-header {
-    padding-top: 5px !important;
-    padding-bottom: 5px !important;
-    margin-top: 0 !important;
-    margin-bottom: 0 !important;
-}
-
-
-
-/* 13. Compact Preact search widget container */
-#preact-border-shadow-host {
-    min-height: 0 !important;
-}
-
-/* 14. Breadcrumb area compactness on search pages */
-.breadcrumb-container,
-.search-breadcrumb {
-    margin-top: 0 !important;
-    margin-bottom: 0 !important;
-    padding-top: 2px !important;
-    padding-bottom: 2px !important;
-}
-
-/* 15. Compact the sort/order section above product grid */
-.product-list-sort,
-.sort-container,
-.js-sortContainer {
-    margin-top: 0 !important;
-    margin-bottom: 5px !important;
-    padding-top: 0 !important;
-    padding-bottom: 0 !important;
-}
+/* --- END OF EXTENSION STYLES --- */

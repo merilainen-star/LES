@@ -39,12 +39,15 @@ function getProductNumber() {
                 if (numberMatch) return numberMatch[1];
             }
         }
-    } catch (e) { }
+    } catch (e) {
+        console.error("LES Error: Failed to find product number", e);
+    }
     return null;
 }
 
 function getProductName() {
-    const h1 = document.querySelector('h1');
+    // Only target the main product h1 by looking inside product page wrappers
+    const h1 = document.querySelector('.product-info h1, .product-page-wrapper h1, .product-page h1');
     return h1 ? h1.innerText.trim() : null;
 }
 
@@ -65,23 +68,41 @@ function createCopyButton(textGetter, type) {
         <span class="tooltip">Copy ${type}</span>
     `;
 
-    button.addEventListener('mouseenter', (e) => {
+    // Shared helper to update tooltip based on modifier key state
+    function updateTooltip(isModifier) {
         const tooltip = button.querySelector('.tooltip');
-        if (e[currentSettings.modifierKey]) {
+        if (isModifier) {
             tooltip.innerText = "Copy number + name (Link)";
         } else {
             tooltip.innerText = `Copy ${type}`;
         }
+    }
+
+    // Key listeners for when the mouse is stationary over the button
+    function onKeyDown(e) {
+        if (e.key === 'Shift' || e.key === 'Control' || e.key === 'Alt') {
+            updateTooltip(e[currentSettings.modifierKey]);
+        }
+    }
+    function onKeyUp(e) {
+        if (e.key === 'Shift' || e.key === 'Control' || e.key === 'Alt') {
+            updateTooltip(e[currentSettings.modifierKey]);
+        }
+    }
+
+    button.addEventListener('mouseenter', (e) => {
+        updateTooltip(e[currentSettings.modifierKey]);
+        document.addEventListener('keydown', onKeyDown);
+        document.addEventListener('keyup', onKeyUp);
+    });
+
+    button.addEventListener('mouseleave', () => {
+        document.removeEventListener('keydown', onKeyDown);
+        document.removeEventListener('keyup', onKeyUp);
     });
 
     button.addEventListener('mousemove', (e) => {
-        const tooltip = button.querySelector('.tooltip');
-        const isModifier = e[currentSettings.modifierKey];
-        if (isModifier && tooltip.innerText !== "Copy number + name (Link)") {
-            tooltip.innerText = "Copy number + name (Link)";
-        } else if (!isModifier && tooltip.innerText === "Copy number + name (Link)") {
-            tooltip.innerText = `Copy ${type}`;
-        }
+        updateTooltip(e[currentSettings.modifierKey]);
     });
 
     button.addEventListener('click', (e) => {
@@ -188,16 +209,20 @@ function findAndInject() {
 
                 if (!alreadyExists) {
                     const btn = createCopyButton(number, 'number');
+                    if (isListPage()) btn.classList.add('lekolar-hover-copy');
                     if (method === 'insertBefore') target.parentNode.insertBefore(btn, target);
                     else target.appendChild(btn);
                 }
             }
         }
-    } catch (e) { }
+    } catch (e) {
+        console.error("LES Error: Failed during findAndInject", e);
+    }
 
     // 2. Inject Product Name Button
     if (!document.querySelector('.lekolar-copy-btn[data-type="name"]')) {
-        const h1 = document.querySelector('h1');
+        // Strict targeting so it doesn't accidentally attach to search result counters or category titles
+        const h1 = document.querySelector('.product-info h1, .product-page-wrapper h1, .product-page h1');
         if (h1) {
             const name = h1.innerText.trim();
             const btn = createCopyButton(name, 'name');
@@ -411,6 +436,15 @@ async function loadNextPage(gridContainer, page, debugElement) {
                 const importedNode = document.importNode(item, true);
                 gridContainer.appendChild(importedNode);
             });
+            
+            // Trigger injection on newly added items
+            setTimeout(() => {
+                if (currentSettings.copyButtons) {
+                    findAndInject();
+                    observeNewProductCards();
+                }
+            }, 150);
+
             return { success: true };
         } else {
             return { success: false, message: 'Could not find product grid on new page.' };
@@ -435,6 +469,12 @@ function fetchProductNumber(url) {
             return;
         }
 
+        // Limit cache size to prevent memory leak
+        if (fetchedProducts.size >= 500) {
+            const firstKey = fetchedProducts.keys().next().value;
+            fetchedProducts.delete(firstKey);
+        }
+
         fetchQueue.push({ url, resolve, reject });
         processFetchQueue();
     });
@@ -452,99 +492,255 @@ async function processFetchQueue() {
         const parser = new DOMParser();
         const doc = parser.parseFromString(text, 'text/html');
 
-        // rigorous checks for product number
-        let productNumber = null;
-
-        // 1. Check data attributes on main elements
-        const buyInfo = doc.querySelector('.buy-info, .js-buyInfo');
-        if (buyInfo && buyInfo.dataset.articlenumber) {
-            productNumber = buyInfo.dataset.articlenumber;
-        }
-
-        // 2. Check "Tuotenro" text
-        if (!productNumber) {
-            const xpath = "//*[contains(text(), 'Tuotenro') or contains(text(), 'Art.nr') or contains(text(), 'Varenr')]";
-            const result = doc.evaluate(xpath, doc, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
-            if (result.singleNodeValue) {
-                const match = result.singleNodeValue.textContent.match(/(?:Tuotenro|Art\.nr|Varenr)[\.\s:]*\s*([\d-]+)/i);
-                if (match) productNumber = match[1];
-            }
-        }
-
-        // 3. Check meta tags or other data attributes
-        if (!productNumber) {
-            const productDiv = doc.querySelector('[data-productnumber]');
-            if (productDiv) productNumber = productDiv.dataset.productnumber;
-        }
+        const productNumber = extractProductNumberFromDoc(doc);
 
         if (productNumber) {
             fetchedProducts.set(url, productNumber);
             resolve(productNumber);
         } else {
-            resolve(null); // Not found
+            resolve(null);
         }
 
     } catch (error) {
         console.error("Error fetching product page:", error);
-        resolve(null); // Resolve null on error to keep queue moving
+        resolve(null);
     } finally {
         isFetching = false;
-        // visual delay to be nice to the server and browser
         setTimeout(processFetchQueue, 300);
     }
 }
 
+// Extract product number from a parsed HTML document
+function extractProductNumberFromDoc(doc) {
+    let productNumber = null;
 
-function enrichProductData() {
-    // Find product items that DO NOT have a copy button yet
-    // Standard list items usually have class 'product-item' or 'category-product'
-    const productItems = document.querySelectorAll('.product-item, .category-product, .product-list-item, article');
+    // 1. Check data attributes on main elements
+    const buyInfo = doc.querySelector('.buy-info, .js-buyInfo');
+    if (buyInfo && buyInfo.dataset.articlenumber) {
+        productNumber = buyInfo.dataset.articlenumber;
+    }
 
-    productItems.forEach(item => {
-        // Check if we already have a button here
-        if (item.querySelector('.lekolar-copy-btn[data-type="number"]')) return;
+    // 2. Check "Tuotenro" text
+    if (!productNumber) {
+        const xpath = "//*[contains(text(), 'Tuotenro') or contains(text(), 'Art.nr') or contains(text(), 'Varenr')]";
+        const result = doc.evaluate(xpath, doc, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
+        if (result.singleNodeValue) {
+            const match = result.singleNodeValue.textContent.match(/(?:Tuotenro|Art\.nr|Varenr)[\.\s:]*\s*([\d-]+)/i);
+            if (match) productNumber = match[1];
+        }
+    }
 
-        // Check if we have a visible Tuotenro text (handled by findAndInject, but maybe missed?)
-        // If findAndInject ran, it should have caught visible text. 
-        // So we focus on items where text is MISSING.
+    // 3. Check meta tags or other data attributes
+    if (!productNumber) {
+        const productDiv = doc.querySelector('[data-productnumber]');
+        if (productDiv) productNumber = productDiv.dataset.productnumber;
+    }
 
-        // Find the link to the product
-        const link = item.querySelector('a[href*="/verkkokauppa/"], a[href*="/sortiment/"]');
-        if (!link) return;
+    return productNumber;
+}
 
-        const url = link.href;
+// Direct fetch for hover — bypasses the slow queue for responsiveness
+async function fetchProductNumberDirect(url) {
+    if (fetchedProducts.has(url)) return fetchedProducts.get(url);
 
-        // Visual indicator that we are working on it? Maybe not needed to keep it clean.
+    try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 8000);
 
-        fetchProductNumber(url).then(number => {
-            if (number) {
-                // Double check if button exists now (async madness)
-                if (item.querySelector('.lekolar-copy-btn[data-type="number"]')) return;
+        const response = await fetch(url, { signal: controller.signal });
+        clearTimeout(timeoutId);
 
-                // Find a good place to inject. 
-                // Try '.product-artno' first (it might be empty)
-                let target = item.querySelector('.product-artno');
+        const text = await response.text();
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(text, 'text/html');
 
-                if (!target) {
-                    // Try after title
-                    target = item.querySelector('.product-title, .inner-title, h3');
-                }
+        const productNumber = extractProductNumberFromDoc(doc);
 
-                if (target) {
-                    const btn = createCopyButton(number, 'number');
+        if (productNumber) {
+            if (fetchedProducts.size >= 500) {
+                const firstKey = fetchedProducts.keys().next().value;
+                fetchedProducts.delete(firstKey);
+            }
+            fetchedProducts.set(url, productNumber);
+        }
+        return productNumber;
+    } catch (error) {
+        console.error("Error fetching product page directly:", error);
+        return null;
+    }
+}
 
-                    // If injecting into empty artno div, clear it just in case and append
-                    if (target.classList.contains('product-artno')) {
-                        target.innerText = `Tuotenro: ${number} `; // Add text like standard
-                        target.appendChild(btn);
-                    } else {
-                        // append to title or other element
-                        target.appendChild(btn);
-                    }
-                }
+
+// --- Hover-to-Reveal + Idle Prefetch System ---
+
+const hoverInitialized = new WeakSet();
+const prefetchQueued = new Set();
+const visibleProductCards = new Set();
+let prefetchObserver = null;
+let idlePrefetchScheduled = false;
+let hoverSystemInitialized = false;
+
+const PRODUCT_CARD_SELECTOR = '.product-item, .category-product, .product-list-item, article';
+
+function isListPage() {
+    // Product detail pages also have '/verkkokauppa/' in their URL,
+    // so check for product page wrapper to exclude them
+    if (document.querySelector('.product-page-wrapper, .jsProductPage')) return false;
+
+    const path = window.location.pathname;
+    const isSearch = path.includes('/haku/') || path.includes('/sok/') || path.includes('/sog/');
+    const isCategory = path.includes('/verkkokauppa/') || path.includes('/sortiment/');
+    return isSearch || isCategory;
+}
+
+function findProductCard(element) {
+    let current = element;
+    while (current && current !== document.body) {
+        if (current.matches && current.matches(PRODUCT_CARD_SELECTOR)) {
+            return current;
+        }
+        current = current.parentElement;
+    }
+    return null;
+}
+
+function getProductCardUrl(card) {
+    const link = card.querySelector('a[href*="/verkkokauppa/"], a[href*="/sortiment/"]');
+    return link ? link.href : null;
+}
+
+function injectCopyButtonOnCard(card, number) {
+    if (card.querySelector('.lekolar-copy-btn[data-type="number"]')) return;
+
+    const btn = createCopyButton(number, 'number');
+    btn.classList.add('lekolar-hover-copy');
+
+    let target = card.querySelector('.product-artno, .eS-product-artno, [class*="artno"]');
+
+    if (target) {
+        target.innerText = `Tuotenro: ${number} `;
+        target.appendChild(btn);
+    } else {
+        target = card.querySelector('.product-title, .inner-title, h3, .product-name, [class*="title"], .eS-productname');
+        if (!target) target = card.querySelector('a') || card;
+        target.appendChild(btn);
+    }
+}
+
+async function handleProductCardHover(card) {
+    if (card.querySelector('.lekolar-copy-btn[data-type="number"]')) return;
+
+    const url = getProductCardUrl(card);
+    if (!url) return;
+
+    // Check cache first — instant show
+    if (fetchedProducts.has(url)) {
+        const number = fetchedProducts.get(url);
+        if (number) injectCopyButtonOnCard(card, number);
+        return;
+    }
+
+    // Direct fetch (bypass slow queue) for responsiveness
+    const number = await fetchProductNumberDirect(url);
+    if (number) injectCopyButtonOnCard(card, number);
+}
+
+function initHoverCopySystem() {
+    if (!isListPage()) return;
+
+    if (!hoverSystemInitialized) {
+        hoverSystemInitialized = true;
+
+        // Event delegation using 'mouseover' (it bubbles, unlike mouseenter)
+        document.body.addEventListener('mouseover', (e) => {
+            if (!currentSettings.copyButtons) return;
+
+            const card = findProductCard(e.target);
+            if (!card || hoverInitialized.has(card)) return;
+
+            hoverInitialized.add(card);
+            handleProductCardHover(card);
+        });
+    }
+
+    // Start / continue idle background prefetch
+    initIdlePrefetch();
+}
+
+function initIdlePrefetch() {
+    if (prefetchObserver) {
+        // Already initialized — just observe any new cards
+        observeNewProductCards();
+        return;
+    }
+
+    prefetchObserver = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+            if (entry.isIntersecting) {
+                visibleProductCards.add(entry.target);
+            } else {
+                visibleProductCards.delete(entry.target);
             }
         });
+        scheduleIdlePrefetch();
+    }, { rootMargin: '300px' });
+
+    observeNewProductCards();
+}
+
+function observeNewProductCards() {
+    if (!prefetchObserver) return;
+
+    const cards = document.querySelectorAll(PRODUCT_CARD_SELECTOR);
+    cards.forEach(card => {
+        const url = getProductCardUrl(card);
+        if (url && !fetchedProducts.has(url) && !prefetchQueued.has(url)) {
+            prefetchObserver.observe(card);
+        }
     });
+}
+
+function scheduleIdlePrefetch() {
+    if (idlePrefetchScheduled || visibleProductCards.size === 0) return;
+    idlePrefetchScheduled = true;
+
+    const callback = (deadline) => {
+        idlePrefetchScheduled = false;
+
+        for (const card of visibleProductCards) {
+            const url = getProductCardUrl(card);
+            if (!url || fetchedProducts.has(url) || prefetchQueued.has(url)) {
+                visibleProductCards.delete(card);
+                prefetchObserver.unobserve(card);
+                continue;
+            }
+
+            if (deadline.timeRemaining() > 5 || deadline.didTimeout) {
+                prefetchQueued.add(url);
+                fetchProductNumber(url).then(number => {
+                    // Data is now cached — button shows instantly on next hover
+                    // If user already hovered this card, inject button now
+                    if (number && hoverInitialized.has(card)) {
+                        injectCopyButtonOnCard(card, number);
+                    }
+                });
+                visibleProductCards.delete(card);
+                prefetchObserver.unobserve(card);
+
+                // Schedule next item
+                scheduleIdlePrefetch();
+                return;
+            }
+            break; // No idle time remaining
+        }
+    };
+
+    if ('requestIdleCallback' in window) {
+        requestIdleCallback(callback, { timeout: 10000 });
+    } else {
+        // Fallback for browsers without requestIdleCallback
+        setTimeout(() => callback({ timeRemaining: () => 50, didTimeout: true }), 2000);
+    }
 }
 
 
@@ -576,51 +772,17 @@ function compactSearchPage() {
     // Also try to find elements by data-content-type="products" parent container
     const searchResults = document.querySelectorAll('[data-content-type="products"]');
     searchResults.forEach(el => {
-        // Move the product list wrapper up by removing its top margin
-        const wrapper = el.querySelector('.product-list-wrapper, .product-tiles');
-        if (wrapper) {
-            wrapper.style.marginTop = '0';
-        }
+        // We no longer zero out the margin here for everything
     });
 
-    // --- Additional compact fixes for remaining whitespace ---
-
-    // Fix .search-result large margin-top (~120px)
-    const searchResultEls = document.querySelectorAll('.search-result, .js-searchResults');
-    searchResultEls.forEach(el => {
-        el.style.setProperty('margin-top', '0', 'important');
-        el.style.setProperty('padding-top', '0', 'important');
-    });
-
-    // Fix .category-content negative top offset (-270px) leaving dead space below
-    const categoryContent = document.querySelectorAll('.category-content');
-    categoryContent.forEach(el => {
-        el.style.setProperty('top', '0', 'important');
-        el.style.setProperty('margin-top', '0', 'important');
-        el.style.setProperty('margin-bottom', '0', 'important');
-    });
-
-    // Fix facet-filter large margin-top (~59px)
-    const facetFilters = document.querySelectorAll('.facet-filter, .js-facet-original');
-    facetFilters.forEach(el => {
-        el.style.setProperty('margin-top', '0', 'important');
-        el.style.setProperty('padding-top', '5px', 'important');
-        el.style.setProperty('padding-bottom', '5px', 'important');
-    });
-
-    // Compact product-list-header (breadcrumbs + result count)
-    const listHeaders = document.querySelectorAll('.product-list-header');
-    listHeaders.forEach(el => {
-        el.style.setProperty('padding-top', '5px', 'important');
-        el.style.setProperty('padding-bottom', '5px', 'important');
-        el.style.setProperty('margin-top', '0', 'important');
-        el.style.setProperty('margin-bottom', '0', 'important');
-    });
-
-    // Compact the Preact search widget container (takes ~638px height)
-    const preactHost = document.getElementById('preact-border-shadow-host');
-    if (preactHost) {
-        preactHost.style.setProperty('min-height', '0', 'important');
+    // The search page has a massive inline 10em margin-top because we hid the tabs.
+    // We strictly apply a margin-fix ONLY on search pages, so product pages are untouched.
+    if (isSearch) {
+        const searchResultEls = document.querySelectorAll('.search-result, .js-searchResults');
+        searchResultEls.forEach(el => {
+            el.style.setProperty('margin-top', '20px', 'important'); // 20px clearance below header
+            el.style.setProperty('padding-top', '0', 'important');
+        });
     }
 }
 
@@ -645,7 +807,7 @@ function initAll() {
     }
     if (currentSettings.copyButtons) {
         findAndInject();
-        enrichProductData();
+        initHoverCopySystem();
     }
 }
 
@@ -666,26 +828,33 @@ chrome.storage.onChanged.addListener((changes, area) => {
         if (currentSettings.infiniteScroll) initSearchConsolidation();
         if (currentSettings.copyButtons) {
             findAndInject();
-            enrichProductData();
+            observeNewProductCards();
         }
     }
 });
 
 // Watch for DOM changes (Infinite Scroll, Navigation)
 let lastUrl = window.location.href;
+let mutationTimeout = null;
+
 const pageObserver = new MutationObserver((mutations) => {
     // Check for URL change
     const url = window.location.href;
     if (url !== lastUrl) {
         lastUrl = url;
+        clearTimeout(mutationTimeout);
         setTimeout(loadSettingsAndInit, 1500); // Re-load settings just in case
     } else {
         // Standard mutation (infinite scroll loading new items)
-        if (currentSettings.infiniteScroll) initSearchConsolidation();
-        if (currentSettings.copyButtons) {
-            findAndInject();
-            enrichProductData();
-        }
+        // Debounce to improve performance
+        clearTimeout(mutationTimeout);
+        mutationTimeout = setTimeout(() => {
+            if (currentSettings.infiniteScroll) initSearchConsolidation();
+            if (currentSettings.copyButtons) {
+                findAndInject();
+                observeNewProductCards();
+            }
+        }, 250);
     }
 });
 

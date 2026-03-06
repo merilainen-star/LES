@@ -1,0 +1,8 @@
+# Dev/debug reference files
+search.html
+
+# Build artifacts
+*.zip
+
+# Node
+node_modules/

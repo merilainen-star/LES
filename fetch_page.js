@@ -1,7 +1,7 @@
 const https = require('https');
 const fs = require('fs');
 
-const url = "https://www.lekolar.fi/verkkokauppa/kaluste-sisustusvalikoima/tuolit-jakkarat/oppilastuolit/matte/muoviristikko-pyorilla-4955-599163/matte-fsc-tuoli-kaasujousella-iso-istuin/";
+const url = "https://www.lekolar.fi/verkkokauppa/kaluste-sisustusvalikoima/tuolit-jakkarat/oppilastuolit/?page=2";
 
 https.get(url, (res) => {
     let data = '';
