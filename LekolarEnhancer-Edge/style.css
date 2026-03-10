@@ -1,0 +1,107 @@
+/* style.css */
+
+.lekolar-copy-btn {
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    padding: 2px 6px;
+    /* slightly increased padding */
+    margin-left: 8px;
+    /* space from product number */
+    vertical-align: middle;
+    position: relative;
+    /* for tooltip positioning */
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    transition: background-color 0.2s;
+    color: #333;
+    /* Default icon color */
+}
+
+.lekolar-copy-btn:hover {
+    background-color: #f0f0f0;
+    /* Subtle hover effect */
+}
+
+.lekolar-copy-btn svg {
+    width: 16px;
+    height: 16px;
+}
+
+/* Tooltip styles */
+.lekolar-copy-btn .tooltip {
+    visibility: hidden;
+    background-color: #333;
+    color: #fff;
+    text-align: center;
+    border-radius: 4px;
+    padding: 5px 8px;
+    position: absolute;
+    z-index: 1000;
+    bottom: 125%;
+    /* Position above the button */
+    left: 50%;
+    transform: translateX(-50%);
+    opacity: 0;
+    transition: opacity 0.3s;
+    font-size: 12px;
+    white-space: nowrap;
+    pointer-events: none;
+    /* Prevent tooltip from interfering with clicks */
+}
+
+.lekolar-copy-btn .tooltip::after {
+    content: "";
+    position: absolute;
+    top: 100%;
+    /* Arrow at the bottom of the tooltip */
+    left: 50%;
+    margin-left: -5px;
+    border-width: 5px;
+    border-style: solid;
+    border-color: #333 transparent transparent transparent;
+}
+
+.lekolar-copy-btn:hover .tooltip {
+    visibility: visible;
+    opacity: 1;
+}
+
+/* ... existing styles ... */
+
+
+.lekolar-loading-sentinel {
+    color: #666;
+    font-size: 14px;
+    font-style: italic;
+    margin: 20px 0;
+}
+
+/* Reveal full product description on grid items */
+.product-tiles .category-product .product-info .inner-info-description,
+.inner-info-description {
+    -webkit-line-clamp: unset !important;
+    line-clamp: unset !important;
+    max-height: none !important;
+    overflow: visible !important;
+    display: block !important;
+}
+
+/* Hover-reveal copy button on search/category list pages */
+.lekolar-hover-copy {
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease;
+}
+
+.product-item:hover .lekolar-hover-copy,
+.category-product:hover .lekolar-hover-copy,
+.product-list-item:hover .lekolar-hover-copy,
+article:hover .lekolar-hover-copy {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+/* --- END OF EXTENSION STYLES --- */

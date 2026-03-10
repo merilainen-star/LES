@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lekolar Enhancer Settings</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+
+<body>
+  <div class="popup-container">
+    <!-- Header -->
+    <div class="popup-header">
+      <img src="icons/icon48.png" alt="Logo" class="header-logo">
+      <div class="header-text">
+        <h1>Lekolar Enhancer</h1>
+        <span class="version">v1.1</span>
+      </div>
+    </div>
+
+    <!-- Feature Toggles -->
+    <div class="section">
+      <h2>Features</h2>
+
+      <label class="toggle-row">
+        <span class="toggle-label">Infinite Scroll</span>
+        <div class="toggle-switch">
+          <input type="checkbox" id="infiniteScroll" checked>
+          <span class="slider"></span>
+        </div>
+      </label>
+
+      <label class="toggle-row">
+        <span class="toggle-label">Copy Buttons</span>
+        <div class="toggle-switch">
+          <input type="checkbox" id="copyButtons" checked>
+          <span class="slider"></span>
+        </div>
+      </label>
+    </div>
+
+    <!-- Modifier Key -->
+    <div class="section">
+      <h2>Link Copy Key</h2>
+      <p class="hint">Hold this key + click copy to copy as link</p>
+      <div class="select-row">
+        <select id="modifierKey">
+          <option value="shiftKey">Shift</option>
+          <option value="altKey">Alt</option>
+          <option value="ctrlKey">Ctrl</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Country Search Config -->
+    <div class="section">
+      <h2>Omnibox Search</h2>
+      <p class="hint">Type <kbd>l</kbd> + space in address bar to search</p>
+
+      <div class="country-list">
+        <div class="country-row">
+          <label class="country-check">
+            <input type="radio" name="country" id="country-fi" value="fi">
+            <span class="flag">🇫🇮</span> FI
+          </label>
+          <input type="text" id="url-fi" class="url-input" value="https://www.lekolar.fi/haku/?query="
+            placeholder="Search URL">
+        </div>
+
+        <div class="country-row">
+          <label class="country-check">
+            <input type="radio" name="country" id="country-se" value="se">
+            <span class="flag">🇸🇪</span> SE
+          </label>
+          <input type="text" id="url-se" class="url-input" value="https://www.lekolar.se/sok/?query="
+            placeholder="Search URL">
+        </div>
+
+        <div class="country-row">
+          <label class="country-check">
+            <input type="radio" name="country" id="country-no" value="no">
+            <span class="flag">🇳🇴</span> NO
+          </label>
+          <input type="text" id="url-no" class="url-input" value="https://www.lekolar.no/sok/?query="
+            placeholder="Search URL">
+        </div>
+
+        <div class="country-row">
+          <label class="country-check">
+            <input type="radio" name="country" id="country-dk" value="dk">
+            <span class="flag">🇩🇰</span> DK
+          </label>
+          <input type="text" id="url-dk" class="url-input" value="https://www.lekolar.dk/soeg/?query="
+            placeholder="Search URL">
+        </div>
+      </div>
+    </div>
+
+    <!-- Save indicator -->
+    <div class="save-indicator" id="saveIndicator">
+      ✓ Settings saved
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+
+</html>

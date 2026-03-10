@@ -1,0 +1,249 @@
+/* popup.css — Dark-themed settings popup */
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    width: 340px;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-size: 13px;
+    background: #1e1e2e;
+    color: #cdd6f4;
+    overflow-x: hidden;
+}
+
+.popup-container {
+    padding: 0;
+}
+
+/* --- Header --- */
+.popup-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 16px;
+    background: linear-gradient(135deg, #313244 0%, #1e1e2e 100%);
+    border-bottom: 1px solid #45475a;
+}
+
+.header-logo {
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+}
+
+.header-text h1 {
+    font-size: 15px;
+    font-weight: 600;
+    color: #cdd6f4;
+    line-height: 1.2;
+}
+
+.version {
+    font-size: 11px;
+    color: #6c7086;
+    font-weight: 400;
+}
+
+/* --- Sections --- */
+.section {
+    padding: 12px 16px;
+    border-bottom: 1px solid #313244;
+}
+
+.section h2 {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    color: #89b4fa;
+    margin-bottom: 8px;
+}
+
+.hint {
+    font-size: 11px;
+    color: #6c7086;
+    margin-bottom: 8px;
+    line-height: 1.3;
+}
+
+.hint kbd {
+    display: inline-block;
+    background: #45475a;
+    color: #cdd6f4;
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-family: monospace;
+    font-size: 11px;
+    border: 1px solid #585b70;
+}
+
+/* --- Toggle Rows --- */
+.toggle-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 0;
+    cursor: pointer;
+    user-select: none;
+}
+
+.toggle-label {
+    font-size: 13px;
+    color: #cdd6f4;
+}
+
+/* Toggle switch */
+.toggle-switch {
+    position: relative;
+    width: 40px;
+    height: 22px;
+    flex-shrink: 0;
+}
+
+.toggle-switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: #45475a;
+    border-radius: 22px;
+    transition: background-color 0.25s ease;
+}
+
+.slider::before {
+    content: '';
+    position: absolute;
+    height: 16px;
+    width: 16px;
+    left: 3px;
+    bottom: 3px;
+    background-color: #cdd6f4;
+    border-radius: 50%;
+    transition: transform 0.25s ease;
+}
+
+.toggle-switch input:checked+.slider {
+    background-color: #89b4fa;
+}
+
+.toggle-switch input:checked+.slider::before {
+    transform: translateX(18px);
+}
+
+/* --- Select Row --- */
+.select-row {
+    position: relative;
+}
+
+.select-row select {
+    width: 100%;
+    padding: 7px 10px;
+    background: #313244;
+    color: #cdd6f4;
+    border: 1px solid #45475a;
+    border-radius: 6px;
+    font-size: 13px;
+    cursor: pointer;
+    appearance: none;
+    -webkit-appearance: none;
+    outline: none;
+    transition: border-color 0.2s;
+}
+
+.select-row select:focus {
+    border-color: #89b4fa;
+}
+
+.select-row::after {
+    content: '▾';
+    position: absolute;
+    right: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: #6c7086;
+    pointer-events: none;
+    font-size: 12px;
+}
+
+/* --- Country Rows --- */
+.country-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.country-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.country-check {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-shrink: 0;
+    width: 70px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 500;
+    user-select: none;
+}
+
+.country-check input[type="checkbox"] {
+    width: 15px;
+    height: 15px;
+    accent-color: #89b4fa;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+
+.flag {
+    font-size: 14px;
+}
+
+.url-input {
+    flex: 1;
+    padding: 5px 8px;
+    background: #313244;
+    color: #a6adc8;
+    border: 1px solid #45475a;
+    border-radius: 4px;
+    font-size: 11px;
+    font-family: 'Consolas', 'Monaco', monospace;
+    outline: none;
+    transition: border-color 0.2s, color 0.2s;
+    min-width: 0;
+}
+
+.url-input:focus {
+    border-color: #89b4fa;
+    color: #cdd6f4;
+}
+
+/* --- Save Indicator --- */
+.save-indicator {
+    text-align: center;
+    padding: 8px 16px;
+    font-size: 12px;
+    color: #a6e3a1;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    pointer-events: none;
+}
+
+.save-indicator.visible {
+    opacity: 1;
+}
