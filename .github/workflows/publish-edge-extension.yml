@@ -91,7 +91,7 @@ jobs:
         run: |
           web-ext sign \
             --source-dir ./LekolarEnhancer \
-            --channel listed \
+            --channel unlisted \
             --api-key    "${{ secrets.FIREFOX_API_ISSUER }}" \
             --api-secret "${{ secrets.FIREFOX_API_SECRET }}" \
             --timeout 300000
