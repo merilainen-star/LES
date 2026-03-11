@@ -60,13 +60,45 @@ function createCopyButton(textGetter, type) {
     const initialValue = getValue();
     if (initialValue) button.dataset.value = initialValue;
 
-    button.innerHTML = `
-        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-copy">
-            <rect x="5" y="5" width="13" height="13" rx="2" ry="2"></rect>
-            <rect x="9" y="9" width="13" height="13" rx="2" ry="2" fill="white"></rect>
-        </svg>
-        <span class="tooltip">Copy ${type}</span>
-    `;
+    const svgNS = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(svgNS, 'svg');
+    svg.setAttribute('xmlns', svgNS);
+    svg.setAttribute('width', '16');
+    svg.setAttribute('height', '16');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('fill', 'none');
+    svg.setAttribute('stroke', 'currentColor');
+    svg.setAttribute('stroke-width', '2');
+    svg.setAttribute('stroke-linecap', 'round');
+    svg.setAttribute('stroke-linejoin', 'round');
+    svg.classList.add('feather', 'feather-copy');
+
+    const rect1 = document.createElementNS(svgNS, 'rect');
+    rect1.setAttribute('x', '5');
+    rect1.setAttribute('y', '5');
+    rect1.setAttribute('width', '13');
+    rect1.setAttribute('height', '13');
+    rect1.setAttribute('rx', '2');
+    rect1.setAttribute('ry', '2');
+
+    const rect2 = document.createElementNS(svgNS, 'rect');
+    rect2.setAttribute('x', '9');
+    rect2.setAttribute('y', '9');
+    rect2.setAttribute('width', '13');
+    rect2.setAttribute('height', '13');
+    rect2.setAttribute('rx', '2');
+    rect2.setAttribute('ry', '2');
+    rect2.setAttribute('fill', 'white');
+
+    svg.appendChild(rect1);
+    svg.appendChild(rect2);
+
+    const tooltip = document.createElement('span');
+    tooltip.className = 'tooltip';
+    tooltip.textContent = `Copy ${type}`;
+
+    button.appendChild(svg);
+    button.appendChild(tooltip);
 
     // Shared helper to update tooltip based on modifier key state
     function updateTooltip(isModifier) {
@@ -246,33 +278,58 @@ function initSearchConsolidation() {
         return;
     }
 
+    // Only run if we haven't already injected the sentinel
+    if (document.getElementById('lekolar-infinite-scroll-sentinel')) return;
+
+    // Helper: check if an element is inside header/nav/footer (should be excluded from grid search)
+    const isInNavOrHeader = (el) => {
+        let cur = el;
+        while (cur && cur !== document.body) {
+            const tag = cur.tagName.toLowerCase();
+            if (tag === 'header' || tag === 'footer' || tag === 'nav') return true;
+            if (cur.getAttribute('role') === 'navigation') return true;
+            cur = cur.parentElement;
+        }
+        return false;
+    };
+
     // Heuristic to find the product grid container
-    const findProductGrid = () => {
-        const productLinks = document.querySelectorAll('a[href*="/verkkokauppa/"], a[href*="/sortiment/"]');
-        if (productLinks.length === 0) return null;
+    const findProductGrid = (doc) => {
+        const root = doc || document;
 
-        const parentCounts = new Map();
-        productLinks.forEach(link => {
-            let current = link;
-            for (let i = 0; i < 5; i++) {
-                if (!current.parentElement) break;
-                current = current.parentElement;
-                const tag = current.tagName.toLowerCase();
-                if (tag === 'div' || tag === 'ul' || tag === 'section') {
-                    parentCounts.set(current, (parentCounts.get(current) || 0) + 1);
-                }
+        // 1. Try specific known Lekolar product grid selectors first
+        const knownSelectors = [
+            '.product-tiles-grid',
+            '.product-tiles',
+            '.product-list',
+            '.products-grid',
+            '.product-grid',
+            '[class*="product-tiles"]',
+        ];
+        for (const sel of knownSelectors) {
+            const el = root.querySelector(sel);
+            if (el && !isInNavOrHeader(el)) {
+                // Verify it has actual product card children
+                const productChildCount = Array.from(el.children).filter(child =>
+                    child.querySelector('a[href*="/verkkokauppa/"], a[href*="/sortiment/"]') && (child.textContent || '').trim().length > 10
+                ).length;
+                if (productChildCount > 0) return el;
             }
-        });
+        }
 
-        // Only run if we haven't already injected the sentinel
-        if (document.getElementById('lekolar-infinite-scroll-sentinel')) return null;
-
-        const mainContent = document.querySelector('main') || document.body;
+        // 2. Fallback heuristic — count direct children with product links,
+        //    but skip any container that lives inside header/nav/footer
+        const mainContent = root.querySelector('main') || root.body;
+        if (!mainContent) return null;
         const allDivs = mainContent.querySelectorAll('div, ul, section');
         let bestContainer = null;
         let maxProductChildren = 0;
 
         allDivs.forEach(div => {
+            if (isInNavOrHeader(div)) return; // Skip nav/header elements
+            // Skip hidden elements (e.g. mobileOnly containers hidden via CSS)
+            if (div.offsetWidth === 0) return;
+
             let productChildrenCount = 0;
             Array.from(div.children).forEach(child => {
                 if (child.querySelector('a[href*="/verkkokauppa/"], a[href*="/sortiment/"]') && child.innerText.length > 10) {
@@ -323,7 +380,7 @@ function initSearchConsolidation() {
         return;
     }
 
-    const container = findProductGrid();
+    const container = findProductGrid(null);
 
 
     if (container) {
@@ -406,26 +463,65 @@ async function loadNextPage(gridContainer, page, debugElement) {
         const parser = new DOMParser();
         const doc = parser.parseFromString(text, 'text/html');
 
-        const fetchedMain = doc.querySelector('main') || doc.body;
-        const fetchedDivs = fetchedMain.querySelectorAll('div, ul, section');
+        // Use the same findProductGrid logic to locate the grid in the fetched page,
+        // so we always pick the right container (not navigation/header).
+        // findProductGrid is defined inside initSearchConsolidation, so we replicate
+        // the same priority logic inline here.
+        const isInNavOrHeaderInDoc = (el) => {
+            let cur = el;
+            while (cur && cur !== doc.body) {
+                const tag = cur.tagName.toLowerCase();
+                if (tag === 'header' || tag === 'footer' || tag === 'nav') return true;
+                if (cur.getAttribute('role') === 'navigation') return true;
+                cur = cur.parentElement;
+            }
+            return false;
+        };
+
+        // 1. Try known selectors first
+        const knownGridSelectors = [
+            '.product-tiles-grid',
+            '.product-tiles',
+            '.product-list',
+            '.products-grid',
+            '.product-grid',
+            '[class*="product-tiles"]',
+        ];
         let fetchedContainer = null;
         let maxChildren = 0;
-
-        // Debug: count candidates
-        let candidates = 0;
-
-        fetchedDivs.forEach(div => {
-            let count = 0;
-            Array.from(div.children).forEach(child => {
-                if (child.querySelector('a[href*="/verkkokauppa/"], a[href*="/sortiment/"]')) count++;
-            });
-            if (count > 0) candidates++;
-
-            if (count > maxChildren) {
-                maxChildren = count;
-                fetchedContainer = div;
+        for (const sel of knownGridSelectors) {
+            const el = doc.querySelector(sel);
+            if (el && !isInNavOrHeaderInDoc(el)) {
+                const count = Array.from(el.children).filter(child =>
+                    child.querySelector('a[href*="/verkkokauppa/"], a[href*="/sortiment/"]') && (child.textContent || '').trim().length > 10
+                ).length;
+                if (count > 0) {
+                    fetchedContainer = el;
+                    maxChildren = count;
+                    break;
+                }
             }
-        });
+        }
+
+        // 2. Fallback heuristic if no known selector matched
+        if (!fetchedContainer) {
+            const fetchedMain = doc.querySelector('main') || doc.body;
+            const fetchedDivs = fetchedMain ? fetchedMain.querySelectorAll('div, ul, section') : [];
+            fetchedDivs.forEach(div => {
+                if (isInNavOrHeaderInDoc(div)) return;
+                // Skip mobile-only containers (they are hidden on desktop and should not be the target)
+                if (div.className && (div.className.includes('mobileOnly') || div.className.includes('mobile-only'))) return;
+
+                let count = 0;
+                Array.from(div.children).forEach(child => {
+                    if (child.querySelector('a[href*="/verkkokauppa/"], a[href*="/sortiment/"]')) count++;
+                });
+                if (count > maxChildren) {
+                    maxChildren = count;
+                    fetchedContainer = div;
+                }
+            });
+        }
 
         if (fetchedContainer && maxChildren > 0) {
             if (debugElement) debugElement.innerText = `Appending ${maxChildren} items...`;
