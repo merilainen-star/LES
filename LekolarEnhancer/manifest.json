@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Lekolar Enhancer",
-  "version": "1.2",
+  "version": "1.3",
   "description": "Adds copy buttons, infinite scroll, and search enhancements for Lekolar sites.",
   "permissions": [
     "activeTab",
