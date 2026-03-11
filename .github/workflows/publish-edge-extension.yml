@@ -1,149 +1,183 @@
-name: Publish Edge Extension
+name: Publish Extensions (Edge + Firefox)
 
 on:
   push:
     branches: [main]
     paths:
+      - 'LekolarEnhancer/**'
       - 'LekolarEnhancer-Edge/**'
 
 jobs:
-  publish:
+  # ── 1. Bump versions and commit back ──────────────────────────────────────
+  bump-versions:
+    name: Bump manifest versions
     runs-on: ubuntu-latest
+    outputs:
+      firefox_changed: ${{ steps.detect.outputs.firefox_changed }}
+      edge_changed: ${{ steps.detect.outputs.edge_changed }}
+      new_version: ${{ steps.bump.outputs.new_version }}
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
         with:
-          # Need full history + write access to commit the version bump
-          fetch-depth: 0
+          fetch-depth: 2
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      # ── Auto-bump the patch version in manifest.json ──────────────────────
-      - name: Bump version in manifest.json
+      - name: Detect which folders changed
+        id: detect
+        run: |
+          CHANGED=$(git diff --name-only HEAD~1 HEAD)
+          echo "$CHANGED"
+          echo "firefox_changed=$(echo "$CHANGED" | grep -q '^LekolarEnhancer/' && echo true || echo false)" >> $GITHUB_OUTPUT
+          echo "edge_changed=$(echo "$CHANGED" | grep -q '^LekolarEnhancer-Edge/' && echo true || echo false)" >> $GITHUB_OUTPUT
+
+      - name: Bump patch version in both manifests
         id: bump
         run: |
-          MANIFEST="LekolarEnhancer-Edge/manifest.json"
-          CURRENT=$(python3 -c "import json,sys; d=json.load(open('$MANIFEST')); print(d['version'])")
+          # Read version from Firefox manifest (source of truth)
+          CURRENT=$(python3 -c "import json; print(json.load(open('LekolarEnhancer/manifest.json'))['version'])")
           echo "Current version: $CURRENT"
 
-          # Split into parts and bump the last number
           IFS='.' read -ra PARTS <<< "$CURRENT"
-          LAST=${PARTS[-1]}
-          PARTS[-1]=$((LAST + 1))
-          NEW_VERSION=$(IFS='.'; echo "${PARTS[*]}")
-          echo "New version: $NEW_VERSION"
+          PARTS[-1]=$((${PARTS[-1]} + 1))
+          NEW=$(IFS='.'; echo "${PARTS[*]}")
+          echo "New version: $NEW"
+          echo "new_version=$NEW" >> $GITHUB_OUTPUT
 
+          # Update Firefox manifest
           python3 - <<EOF
           import json
-          with open('$MANIFEST', 'r') as f:
-              data = json.load(f)
-          data['version'] = '$NEW_VERSION'
-          with open('$MANIFEST', 'w') as f:
-              json.dump(data, f, indent=2, ensure_ascii=False)
-              f.write('\n')
+          for path in ['LekolarEnhancer/manifest.json', 'LekolarEnhancer-Edge/manifest.json']:
+              with open(path, 'r') as f:
+                  data = json.load(f)
+              data['version'] = '$NEW'
+              with open(path, 'w') as f:
+                  json.dump(data, f, indent=2, ensure_ascii=False)
+                  f.write('\n')
           EOF
-
-          echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
 
       - name: Commit and push version bump
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add LekolarEnhancer-Edge/manifest.json
-          git commit -m "chore: bump Edge extension version to ${{ steps.bump.outputs.new_version }} [skip ci]"
+          git add LekolarEnhancer/manifest.json LekolarEnhancer-Edge/manifest.json
+          git diff --cached --quiet && echo "No changes to commit" || \
+            git commit -m "chore: bump extension version to ${{ steps.bump.outputs.new_version }} [skip ci]"
           git push
 
-      # ── Package ───────────────────────────────────────────────────────────
+  # ── 2a. Publish to Firefox AMO ─────────────────────────────────────────────
+  publish-firefox:
+    name: Publish to Firefox AMO
+    needs: bump-versions
+    if: needs.bump-versions.outputs.firefox_changed == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout (after version bump commit)
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install web-ext
+        run: npm install -g web-ext
+
+      - name: Sign & upload to AMO
+        run: |
+          web-ext sign \
+            --source-dir ./LekolarEnhancer \
+            --channel listed \
+            --api-key    "${{ secrets.FIREFOX_API_ISSUER }}" \
+            --api-secret "${{ secrets.FIREFOX_API_SECRET }}" \
+            --timeout 300000
+        # 'listed' = public AMO listing (use 'unlisted' for private/self-hosted)
+
+  # ── 2b. Publish to Edge Add-ons ───────────────────────────────────────────
+  publish-edge:
+    name: Publish to Edge Add-ons
+    needs: bump-versions
+    if: needs.bump-versions.outputs.edge_changed == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout (after version bump commit)
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
       - name: Create extension ZIP
         run: |
           cd LekolarEnhancer-Edge
-          zip -r ../extension.zip . --exclude "*.git*" --exclude "*.DS_Store"
-          echo "ZIP created. Size: $(du -sh ../extension.zip | cut -f1)"
+          zip -r ../edge-extension.zip . --exclude "*.git*" --exclude "*.DS_Store"
+          echo "ZIP created: $(du -sh ../edge-extension.zip | cut -f1)"
 
-      # ── Upload to Edge Add-ons ─────────────────────────────────────────────
-      - name: Upload package
+      - name: Upload package to Edge
         id: upload
         run: |
-          echo "Uploading extension..."
           RESPONSE=$(curl -s -i \
             -H "Authorization: ApiKey ${{ secrets.EDGE_API_KEY }}" \
             -H "X-ClientID: ${{ secrets.EDGE_CLIENT_ID }}" \
             -H "Content-Type: application/zip" \
             -X POST \
-            -T extension.zip \
+            -T edge-extension.zip \
             "https://api.addons.microsoftedge.microsoft.com/v1/products/${{ secrets.EDGE_PRODUCT_ID }}/submissions/draft/package")
 
           echo "$RESPONSE"
+          STATUS=$(echo "$RESPONSE" | grep "^HTTP" | tail -1 | awk '{print $2}')
+          OP_ID=$(echo "$RESPONSE"  | grep -i "^Location:" | awk '{print $2}' | tr -d '\r\n')
+          echo "HTTP: $STATUS  |  OperationId: $OP_ID"
+          echo "operation_id=$OP_ID" >> $GITHUB_OUTPUT
+          [ "$STATUS" = "202" ] || (echo "Upload failed ($STATUS)" && exit 1)
 
-          STATUS_CODE=$(echo "$RESPONSE" | grep "^HTTP" | tail -1 | awk '{print $2}')
-          echo "HTTP status: $STATUS_CODE"
-
-          OPERATION_ID=$(echo "$RESPONSE" | grep -i "^Location:" | awk '{print $2}' | tr -d '\r\n')
-          echo "Operation ID: $OPERATION_ID"
-          echo "operation_id=$OPERATION_ID" >> $GITHUB_OUTPUT
-
-          [ "$STATUS_CODE" = "202" ] || (echo "Upload failed with status $STATUS_CODE" && exit 1)
-
-      # ── Wait for upload to process ─────────────────────────────────────────
-      - name: Wait for upload to complete
+      - name: Wait for upload
         run: |
-          STATUS="InProgress"
-          RETRIES=0
-          MAX=15
-          while [ "$STATUS" = "InProgress" ] && [ $RETRIES -lt $MAX ]; do
+          STATUS="InProgress"; N=0
+          while [ "$STATUS" = "InProgress" ] && [ $N -lt 15 ]; do
             sleep 10
-            RESP=$(curl -s \
+            R=$(curl -s \
               -H "Authorization: ApiKey ${{ secrets.EDGE_API_KEY }}" \
               -H "X-ClientID: ${{ secrets.EDGE_CLIENT_ID }}" \
               "https://api.addons.microsoftedge.microsoft.com${{ steps.upload.outputs.operation_id }}")
-            echo "Poll $((RETRIES+1)): $RESP"
-            STATUS=$(echo "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('status','InProgress'))" 2>/dev/null || echo "InProgress")
-            RETRIES=$((RETRIES + 1))
+            STATUS=$(echo "$R" | python3 -c "import sys,json; print(json.load(sys.stdin).get('status','InProgress'))" 2>/dev/null || echo "InProgress")
+            echo "Poll $((++N)): $STATUS"
           done
-          echo "Upload final status: $STATUS"
-          [ "$STATUS" = "Succeeded" ] || (echo "Upload did not succeed. Status: $STATUS" && exit 1)
+          [ "$STATUS" = "Succeeded" ] || (echo "Upload did not succeed: $STATUS" && exit 1)
 
-      # ── Publish ────────────────────────────────────────────────────────────
       - name: Publish submission
         id: publish
         run: |
-          echo "Publishing..."
           RESPONSE=$(curl -s -i \
             -H "Authorization: ApiKey ${{ secrets.EDGE_API_KEY }}" \
             -H "X-ClientID: ${{ secrets.EDGE_CLIENT_ID }}" \
             -H "Content-Type: application/json" \
             -X POST \
-            -d "{\"notes\": \"Auto-published from GitHub Actions — v${{ steps.bump.outputs.new_version }}\"}" \
+            -d "{\"notes\": \"Auto-published v${{ needs.bump-versions.outputs.new_version }} via GitHub Actions\"}" \
             "https://api.addons.microsoftedge.microsoft.com/v1/products/${{ secrets.EDGE_PRODUCT_ID }}/submissions")
 
           echo "$RESPONSE"
+          STATUS=$(echo "$RESPONSE" | grep "^HTTP" | tail -1 | awk '{print $2}')
+          OP_ID=$(echo "$RESPONSE"  | grep -i "^Location:" | awk '{print $2}' | tr -d '\r\n')
+          echo "operation_id=$OP_ID" >> $GITHUB_OUTPUT
+          [ "$STATUS" = "202" ] || (echo "Publish failed ($STATUS)" && exit 1)
 
-          STATUS_CODE=$(echo "$RESPONSE" | grep "^HTTP" | tail -1 | awk '{print $2}')
-          echo "HTTP status: $STATUS_CODE"
-
-          OPERATION_ID=$(echo "$RESPONSE" | grep -i "^Location:" | awk '{print $2}' | tr -d '\r\n')
-          echo "Operation ID: $OPERATION_ID"
-          echo "operation_id=$OPERATION_ID" >> $GITHUB_OUTPUT
-
-          [ "$STATUS_CODE" = "202" ] || (echo "Publish failed with status $STATUS_CODE" && exit 1)
-
-      # ── Wait for publish to complete ───────────────────────────────────────
-      - name: Check publish status
+      - name: Wait for publish
         run: |
-          STATUS="InProgress"
-          RETRIES=0
-          MAX=20
-          while [ "$STATUS" = "InProgress" ] && [ $RETRIES -lt $MAX ]; do
+          STATUS="InProgress"; N=0
+          while [ "$STATUS" = "InProgress" ] && [ $N -lt 20 ]; do
             sleep 15
-            RESP=$(curl -s \
+            R=$(curl -s \
               -H "Authorization: ApiKey ${{ secrets.EDGE_API_KEY }}" \
               -H "X-ClientID: ${{ secrets.EDGE_CLIENT_ID }}" \
               "https://api.addons.microsoftedge.microsoft.com${{ steps.publish.outputs.operation_id }}")
-            echo "Poll $((RETRIES+1)): $RESP"
-            STATUS=$(echo "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('status','InProgress'))" 2>/dev/null || echo "InProgress")
-            RETRIES=$((RETRIES + 1))
+            STATUS=$(echo "$R" | python3 -c "import sys,json; print(json.load(sys.stdin).get('status','InProgress'))" 2>/dev/null || echo "InProgress")
+            echo "Poll $((++N)): $STATUS"
           done
-          echo "Publish final status: $STATUS"
-          # InProgress after max retries = submitted for review, which is fine
-          [ "$STATUS" = "Succeeded" ] || [ "$STATUS" = "InProgress" ] || (echo "Publish failed. Status: $STATUS" && exit 1)
-          echo "✅ Extension v${{ steps.bump.outputs.new_version }} submitted successfully!"
+          # InProgress after max polls = submitted for review, which is normal
+          [ "$STATUS" = "Succeeded" ] || [ "$STATUS" = "InProgress" ] || \
+            (echo "Publish failed: $STATUS" && exit 1)
+          echo "✅ Edge extension v${{ needs.bump-versions.outputs.new_version }} submitted!"
