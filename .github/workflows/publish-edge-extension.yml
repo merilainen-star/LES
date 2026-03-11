@@ -12,6 +12,8 @@ jobs:
   bump-versions:
     name: Bump manifest versions
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     outputs:
       firefox_changed: ${{ steps.detect.outputs.firefox_changed }}
       edge_changed: ${{ steps.detect.outputs.edge_changed }}
