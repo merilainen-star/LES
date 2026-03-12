@@ -261,11 +261,415 @@ function findAndInject() {
             h1.appendChild(btn);
         }
     }
+
+    // 3. Inject "Find Similar" Button
+    if (!document.querySelector('.lekolar-find-similar-btn')) {
+        const h1 = document.querySelector('.product-info h1, .product-page-wrapper h1, .product-page h1');
+        if (h1) {
+            const btn = document.createElement('button');
+            btn.className = 'lekolar-find-similar-btn';
+            btn.title = 'Find similar products based on specifications';
+            
+            const svgNS = 'http://www.w3.org/2000/svg';
+            const svg = document.createElementNS(svgNS, 'svg');
+            svg.setAttribute('xmlns', svgNS);
+            svg.setAttribute('width', '16');
+            svg.setAttribute('height', '16');
+            svg.setAttribute('viewBox', '0 0 24 24');
+            svg.setAttribute('fill', 'none');
+            svg.setAttribute('stroke', 'currentColor');
+            svg.setAttribute('stroke-width', '2');
+            svg.setAttribute('stroke-linecap', 'round');
+            svg.setAttribute('stroke-linejoin', 'round');
+            
+            const circle = document.createElementNS(svgNS, 'circle');
+            circle.setAttribute('cx', '11');
+            circle.setAttribute('cy', '11');
+            circle.setAttribute('r', '8');
+            const line = document.createElementNS(svgNS, 'line');
+            line.setAttribute('x1', '21');
+            line.setAttribute('y1', '21');
+            line.setAttribute('x2', '16.65');
+            line.setAttribute('y2', '16.65');
+            
+            svg.appendChild(circle);
+            svg.appendChild(line);
+            
+            const span = document.createElement('span');
+            span.innerText = ' Find Similar';
+            
+            btn.appendChild(svg);
+            btn.appendChild(span);
+            
+            btn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                
+                // Extract filters from the current page's specification table
+                const filters = {};
+                document.querySelectorAll('tr, .d-flex, .product-properties li').forEach(row => {
+                    const th = row.querySelector('th, dt, .product-attributes__name, .heading');
+                    let val = '';
+                    
+                    if (row.tagName.toLowerCase() === 'li') {
+                        const valSpan = row.querySelector('span:not(.heading), .color-wrapper');
+                        if (valSpan) {
+                            const colorBubble = valSpan.querySelector('.color-bubble');
+                            if (colorBubble && colorBubble.title) {
+                                val = colorBubble.title;
+                            } else {
+                                val = valSpan.innerText.trim();
+                            }
+                        }
+                    } else {
+                        const td = row.querySelector('td, dd, .product-attributes__value');
+                        if (td) val = td.innerText.trim();
+                    }
+
+                    if (th && val) {
+                        const key = th.innerText.trim().toLowerCase();
+                        
+                        // Clean up values
+                        // We intentionally OMIT the series filter so we can find tables in *different* series.
+                        // if (key.includes('tuoteperhe') || key.includes('product series')) filters.series = val;
+                        
+                        // For "Find Similar", we intentionally exclude Color, Material, Ecolabels, and Series
+                        // to ensure we find all variations of the product across different families.
+                        
+                        // Parse dimensions (extract first valid number block like "120" or "72,5")
+                        const dimMatch = val.match(/\d+(?:[.,]\d+)?/);
+                        const dimVal = dimMatch ? dimMatch[0] : null;
+
+                        if (dimVal) {
+                            if (key === 'pituus' || key === 'length' || key.includes('pituus:')) filters.length = dimVal;
+                            if (key === 'leveys' || key === 'width' || key.includes('leveys:')) filters.width = dimVal;
+                            if (key === 'korkeus' || key === 'height' || key.includes('korkeus:')) filters.height = dimVal;
+                            if (key === 'halkaisija' || key === 'diameter' || key.includes('halkaisija:')) filters.diameter = dimVal;
+                            if (key === 'istuinkorkeus' || key === 'seat height' || key.includes('istuinkorkeus:')) filters.seatHeight = dimVal;
+                        }
+                    }
+                });
+
+                // Instead of jumping to the global /haku/ search which requires a text query,
+                // we will use the product's current category URL as the base for the facets!
+                // Example product URL: https://www.lekolar.fi/verkkokauppa/kaluste/poydat/oppilaspoydat/1238/tuote/
+                // Target category URL: https://www.lekolar.fi/verkkokauppa/kaluste/poydat/oppilaspoydat/
+                
+                let baseUrl = window.location.origin + '/haku/';
+                const pathParts = window.location.pathname.split('/');
+                
+                // If we are deep in a category (verkkokauppa or sortiment), 
+                // step back exactly two levels to reach the main product family/category listing.
+                if (pathParts.includes('verkkokauppa') || pathParts.includes('sortiment')) {
+                    // Remove trailing empty string if exists
+                    if (pathParts[pathParts.length - 1] === '') pathParts.pop();
+                    
+                    const breadcrumbs = Array.from(document.querySelectorAll('.breadcrumbs a, .breadcrumb a'));
+                    if (breadcrumbs.length > 2) {
+                        // The last breadcrumb is usually the specific series (e.g. "1238").
+                        // The second to last link is the broader category (e.g. "Oppilaspöydät").
+                        // By jumping to the broader category, we search ACROSS all series for similar dimensions!
+                        baseUrl = breadcrumbs[breadcrumbs.length - 2].href;
+                        baseUrl = baseUrl.split('?')[0]; 
+                    } else if (breadcrumbs.length > 1) {
+                        baseUrl = breadcrumbs[breadcrumbs.length - 1].href.split('?')[0]; 
+                    } else {
+                        // Fallback: strip last 3 URL segments to try and escape the series folder
+                        pathParts.pop();
+                        pathParts.pop();
+                        pathParts.pop();
+                        baseUrl = window.location.origin + pathParts.join('/') + '/';
+                    }
+                }
+                
+                if (typeof window.buildLekolarSearchUrl === 'function') {
+                    const searchUrl = window.buildLekolarSearchUrl(baseUrl, '', filters);
+                    window.open(searchUrl, '_blank');
+                } else {
+                    console.error("searchUtils.js not loaded.");
+                }
+            });
+
+            h1.appendChild(btn);
+        }
+    }
 }
 
 
 
-// --- Search Consolidation Logic (Infinite Scroll) ---
+// --- Shared Utility Functions ---
+function findProductGridInDoc(doc) {
+    const root = doc || document;
+
+    const isInNavOrHeader = (el) => {
+        let cur = el;
+        while (cur && cur !== root.body) {
+            const tag = cur.tagName.toLowerCase();
+            if (tag === 'header' || tag === 'footer' || tag === 'nav') return true;
+            if (cur.getAttribute('role') === 'navigation') return true;
+            cur = cur.parentElement;
+        }
+        return false;
+    };
+
+    const knownSelectors = [
+        '.product-tiles-grid',
+        '.product-tiles',
+        '.product-list',
+        '.products-grid',
+        '.product-grid',
+        '[class*="product-tiles"]',
+    ];
+    for (const sel of knownSelectors) {
+        const el = root.querySelector(sel);
+        if (el && !isInNavOrHeader(el)) {
+            const productChildCount = Array.from(el.children).filter(child =>
+                child.querySelector('a[href*="/verkkokauppa/"], a[href*="/sortiment/"]') && (child.textContent || '').trim().length > 10
+            ).length;
+            if (productChildCount > 0) return el;
+        }
+    }
+
+    const mainContent = root.querySelector('main') || root.body;
+    if (!mainContent) return null;
+    const allDivs = mainContent.querySelectorAll('div, ul, section');
+    let bestContainer = null;
+    let maxProductChildren = 0;
+
+    allDivs.forEach(div => {
+        if (isInNavOrHeader(div)) return;
+        // Skip hidden elements if checking main document
+        if (!doc && div.offsetWidth === 0) return;
+        if (doc && div.className && (div.className.includes('mobileOnly') || div.className.includes('mobile-only'))) return;
+
+        let productChildrenCount = 0;
+        Array.from(div.children).forEach(child => {
+            if (child.querySelector('a[href*="/verkkokauppa/"], a[href*="/sortiment/"]') && (child.textContent || '').trim().length > 10) {
+                productChildrenCount++;
+            }
+        });
+
+        if (productChildrenCount > maxProductChildren) {
+            maxProductChildren = productChildrenCount;
+            bestContainer = div;
+        }
+    });
+
+    if (maxProductChildren > 2) {
+        return bestContainer;
+    }
+
+    return null;
+}
+
+// --- Price Sorting for Sales Reps ---
+
+let isPriceSortActive = false;
+let originalGridContent = null;
+let allSortedCards = [];
+
+function extractPriceFromCard(card) {
+    const priceTokens = [];
+    const elements = card.querySelectorAll('.price, .product-price, .sales-price, [class*="price"], .amount');
+    
+    for (const el of elements) {
+        if (el.offsetParent === null && el.closest('.hidden')) continue;
+        const text = el.innerText.trim();
+        if (text) priceTokens.push(text);
+    }
+    
+    if (priceTokens.length === 0) {
+        const lines = card.innerText.split('\n');
+        for (const line of lines) {
+            if (/(€|kr|sek|nok|dkk)/i.test(line) && /\d/.test(line)) {
+                priceTokens.push(line);
+            }
+        }
+    }
+    
+    for (const text of priceTokens) {
+        let cleanText = text.replace(/\s+/g, '').replace(',', '.');
+        const match = cleanText.match(/\d+(\.\d+)?/);
+        if (match) {
+            return parseFloat(match[0]);
+        }
+    }
+    return null;
+}
+
+async function performPriceSort(order, gridContainer) {
+    if (!gridContainer) return;
+    
+    isPriceSortActive = true;
+    
+    let overlay = document.getElementById('lekolar-sort-overlay');
+    if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.id = 'lekolar-sort-overlay';
+        overlay.className = 'lekolar-loading-overlay';
+        
+        const spinner = document.createElement('div');
+        spinner.className = 'lekolar-spinner';
+        
+        const text = document.createElement('div');
+        text.className = 'lekolar-loading-text';
+        text.innerText = 'Fetching all pages for sorting...';
+        
+        overlay.appendChild(spinner);
+        overlay.appendChild(text);
+        document.body.appendChild(overlay);
+    }
+    overlay.style.display = 'flex';
+    
+    try {
+        const urlParams = new URL(window.location.href).searchParams;
+        let startPage = 1;
+        if (urlParams.get('page')) startPage = parseInt(urlParams.get('page'));
+        
+        let currentCards = Array.from(gridContainer.children).filter(child => child.matches(PRODUCT_CARD_SELECTOR));
+        
+        let fetchPage = startPage + 1;
+        let keepFetching = true;
+        
+        if (allSortedCards.length === 0 || allSortedCards.length < currentCards.length) {
+            const textEl = overlay.querySelector('.lekolar-loading-text');
+            
+            while (keepFetching) {
+                if (textEl) textEl.innerText = `Fetching page ${fetchPage} for sorting...`;
+                
+                const currentUrl = new URL(window.location.href);
+                currentUrl.searchParams.set('page', fetchPage);
+                const nextUrl = currentUrl.toString();
+                
+                const response = await fetch(nextUrl);
+                if (!response.ok) {
+                    keepFetching = false;
+                    break;
+                }
+                
+                const text = await response.text();
+                const parser = new DOMParser();
+                const doc = parser.parseFromString(text, 'text/html');
+                
+                const fetchedContainer = findProductGridInDoc(doc);
+                if (!fetchedContainer || fetchedContainer.children.length === 0) {
+                    keepFetching = false;
+                    break;
+                }
+                
+                const newItems = Array.from(fetchedContainer.children).filter(child => child.matches(PRODUCT_CARD_SELECTOR));
+                if (newItems.length === 0) {
+                    keepFetching = false;
+                    break;
+                }
+                
+                newItems.forEach(item => {
+                    const importedNode = document.importNode(item, true);
+                    currentCards.push(importedNode);
+                });
+                
+                fetchPage++;
+            }
+        } else {
+            currentCards = allSortedCards;
+        }
+        
+        const cardsWithPrices = currentCards.map(card => {
+            return {
+                element: card,
+                price: extractPriceFromCard(card) || 99999999 
+            };
+        });
+        
+        cardsWithPrices.sort((a, b) => {
+            if (order === 'asc') return a.price - b.price;
+            if (order === 'desc') return b.price - a.price;
+            return 0;
+        });
+        
+        allSortedCards = cardsWithPrices.map(c => c.element);
+        
+        if (!originalGridContent) {
+            originalGridContent = Array.from(gridContainer.children);
+        }
+        
+        gridContainer.innerHTML = '';
+        allSortedCards.forEach(card => gridContainer.appendChild(card));
+        
+        overlay.style.display = 'none';
+        
+        setTimeout(() => {
+            if (currentSettings.copyButtons) {
+                findAndInject();
+                observeNewProductCards();
+            }
+        }, 150);
+        
+    } catch (e) {
+        console.error("Sorting error:", e);
+        const textEl = overlay.querySelector('.lekolar-loading-text');
+        if (textEl) textEl.innerText = 'Error sorting: ' + e.message;
+        setTimeout(() => { overlay.style.display = 'none'; }, 2000);
+    }
+}
+
+function initPriceSorting() {
+    const isSearch = (window.location.pathname.includes('/haku/') || window.location.pathname.includes('/sok/') || window.location.pathname.includes('/sog/')) && window.location.search.includes('query=');
+    const isCategory = window.location.pathname.includes('/verkkokauppa/') || window.location.pathname.includes('/sortiment/');
+    if (!isSearch && !isCategory) return;
+    
+    if (document.querySelector('.lekolar-sort-container')) return;
+
+    const allCards = document.querySelectorAll(PRODUCT_CARD_SELECTOR);
+    if (!allCards || allCards.length === 0) return;
+    
+    let pricesFound = 0;
+    for (let i = 0; i < Math.min(allCards.length, 5); i++) {
+        if (extractPriceFromCard(allCards[i]) !== null) {
+            pricesFound++;
+        }
+    }
+    
+    if (pricesFound === 0) return; 
+    
+    const container = document.createElement('div');
+    container.className = 'lekolar-sort-container';
+    
+    const label = document.createElement('label');
+    label.innerText = 'Sort: ';
+    label.setAttribute('for', 'lekolar-price-sort');
+    
+    const select = document.createElement('select');
+    select.id = 'lekolar-price-sort';
+    select.className = 'lekolar-sort-select';
+    select.innerHTML = `
+        <option value="">Default</option>
+        <option value="asc">Price: Low to High</option>
+        <option value="desc">Price: High to Low</option>
+    `;
+    
+    container.appendChild(label);
+    container.appendChild(select);
+    
+    const gridContainer = findProductGridInDoc(document);
+    if (!gridContainer) return;
+
+    let target = gridContainer.previousElementSibling;
+    if (target && target.className && target.className.includes('header')) {
+        target.appendChild(container);
+    } else {
+        gridContainer.parentNode.insertBefore(container, gridContainer);
+    }
+    
+    select.addEventListener('change', async (e) => {
+        const value = e.target.value;
+        if (!value) {
+            window.location.reload();
+            return;
+        }
+        await performPriceSort(value, gridContainer);
+    });
+}
 
 function initSearchConsolidation() {
     // Run on search pages AND category pages
@@ -363,9 +767,12 @@ function initSearchConsolidation() {
         if (pageLinks.length > 0) return true;
 
         // Check for specific text like "Next" or ">"
+        // VERY IMPORTANT: Use textContent instead of innerText here to prevent massive layout thrashing
+        // which completely freezes the browser on pages with many links!
         const allLinks = document.querySelectorAll('a');
         for (let link of allLinks) {
-            if (link.innerText.includes('Seuraava') || link.innerText.includes('Nästa') || link.innerText.includes('Neste') || link.innerText.includes('Næste') || link.innerText.trim() === '>' || link.innerText.trim() === '›') {
+            const text = (link.textContent || '').trim();
+            if (text.includes('Seuraava') || text.includes('Nästa') || text.includes('Neste') || text.includes('Næste') || text === '>' || text === '›') {
                 return true;
             }
         }
@@ -413,6 +820,7 @@ function initSearchConsolidation() {
         let hasMore = true;
 
         const observer = new IntersectionObserver(async (entries) => {
+            if (isPriceSortActive) return;
             if (entries[0].isIntersecting && !isLoading && hasMore) {
                 isLoading = true;
                 sentinel.innerText = 'Initializing fetch...';
@@ -463,65 +871,8 @@ async function loadNextPage(gridContainer, page, debugElement) {
         const parser = new DOMParser();
         const doc = parser.parseFromString(text, 'text/html');
 
-        // Use the same findProductGrid logic to locate the grid in the fetched page,
-        // so we always pick the right container (not navigation/header).
-        // findProductGrid is defined inside initSearchConsolidation, so we replicate
-        // the same priority logic inline here.
-        const isInNavOrHeaderInDoc = (el) => {
-            let cur = el;
-            while (cur && cur !== doc.body) {
-                const tag = cur.tagName.toLowerCase();
-                if (tag === 'header' || tag === 'footer' || tag === 'nav') return true;
-                if (cur.getAttribute('role') === 'navigation') return true;
-                cur = cur.parentElement;
-            }
-            return false;
-        };
-
-        // 1. Try known selectors first
-        const knownGridSelectors = [
-            '.product-tiles-grid',
-            '.product-tiles',
-            '.product-list',
-            '.products-grid',
-            '.product-grid',
-            '[class*="product-tiles"]',
-        ];
-        let fetchedContainer = null;
-        let maxChildren = 0;
-        for (const sel of knownGridSelectors) {
-            const el = doc.querySelector(sel);
-            if (el && !isInNavOrHeaderInDoc(el)) {
-                const count = Array.from(el.children).filter(child =>
-                    child.querySelector('a[href*="/verkkokauppa/"], a[href*="/sortiment/"]') && (child.textContent || '').trim().length > 10
-                ).length;
-                if (count > 0) {
-                    fetchedContainer = el;
-                    maxChildren = count;
-                    break;
-                }
-            }
-        }
-
-        // 2. Fallback heuristic if no known selector matched
-        if (!fetchedContainer) {
-            const fetchedMain = doc.querySelector('main') || doc.body;
-            const fetchedDivs = fetchedMain ? fetchedMain.querySelectorAll('div, ul, section') : [];
-            fetchedDivs.forEach(div => {
-                if (isInNavOrHeaderInDoc(div)) return;
-                // Skip mobile-only containers (they are hidden on desktop and should not be the target)
-                if (div.className && (div.className.includes('mobileOnly') || div.className.includes('mobile-only'))) return;
-
-                let count = 0;
-                Array.from(div.children).forEach(child => {
-                    if (child.querySelector('a[href*="/verkkokauppa/"], a[href*="/sortiment/"]')) count++;
-                });
-                if (count > maxChildren) {
-                    maxChildren = count;
-                    fetchedContainer = div;
-                }
-            });
-        }
+        const fetchedContainer = findProductGridInDoc(doc);
+        const maxChildren = fetchedContainer ? fetchedContainer.children.length : 0;
 
         if (fetchedContainer && maxChildren > 0) {
             if (debugElement) debugElement.innerText = `Appending ${maxChildren} items...`;
@@ -905,6 +1256,8 @@ function initAll() {
         findAndInject();
         initHoverCopySystem();
     }
+    // Always attempt to init price sorting if user is standard
+    initPriceSorting();
 }
 
 if (document.readyState === 'loading') {

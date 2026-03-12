@@ -55,6 +55,7 @@
         "*://*.lekolar.dk/*"
       ],
       "js": [
+        "searchUtils.js",
         "content.js"
       ],
       "css": [

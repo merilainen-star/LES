@@ -97,12 +97,33 @@
       </div>
     </div>
 
+    <!-- Smart Search -->
+    <div class="section">
+      <h2>Smart Search</h2>
+      <p class="hint">Generate exact filter URLs from attributes.</p>
+      
+      <div class="search-form">
+        <input type="text" id="smartQuery" class="text-input" placeholder="Query (e.g. tuoli)">
+        
+        <div class="input-grid">
+          <input type="number" id="smartLength" class="text-input" placeholder="Length cm">
+          <input type="number" id="smartWidth" class="text-input" placeholder="Width cm">
+          <input type="text" id="smartColor" class="text-input" placeholder="Color">
+          <input type="text" id="smartSeries" class="text-input" placeholder="Series (e.g. Lex)">
+          <input type="text" id="smartEcolabel" class="text-input" placeholder="Ecolabel (e.g. FSC)">
+        </div>
+        
+        <button id="smartSearchBtn" class="primary-btn">Open Search</button>
+      </div>
+    </div>
+
     <!-- Save indicator -->
     <div class="save-indicator" id="saveIndicator">
       ✓ Settings saved
     </div>
   </div>
 
+  <script src="searchUtils.js"></script>
   <script src="popup.js"></script>
 </body>
 

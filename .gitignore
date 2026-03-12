@@ -9,3 +9,8 @@ search.html
 
 # Node
 node_modules/
+
+# Secrets / PIM Data
+LekolarEnhancer/PimData.json
+PimData.json
+*.json

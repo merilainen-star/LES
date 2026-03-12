@@ -1,4 +1,9 @@
 // background.js — Service worker for omnibox search & default settings
+try {
+    importScripts('searchUtils.js');
+} catch (e) {
+    console.error("Failed to load searchUtils.js", e);
+}
 
 const DEFAULT_SETTINGS = {
     infiniteScroll: true,
@@ -33,39 +38,102 @@ chrome.runtime.onInstalled.addListener(() => {
     });
 });
 
-// Omnibox — user types the keyword ("l") then a search term
+// Parse query string into filters and search phrase
+function parseOmniboxQuery(text) {
+    const filters = {};
+    let queryArgs = [];
+    
+    // Split by spaces
+    const parts = text.split(/\s+/);
+    
+    const knownKeys = {
+        'length': 'length', 'pituus': 'length',
+        'width': 'width', 'leveys': 'width',
+        'height': 'height', 'korkeus': 'height',
+        'depth': 'depth', 'syvyys': 'depth',
+        'diameter': 'diameter', 'halkaisija': 'diameter',
+        'color': 'color', 'väri': 'color', 'vari': 'color',
+        'series': 'series', 'tuoteperhe': 'series',
+        'material': 'material', 'materiaali': 'material',
+        'ecolabel': 'ecolabel', 'ympäristö': 'ecolabel'
+    };
+    
+    for (let i = 0; i < parts.length; i++) {
+        let part = parts[i].toLowerCase();
+        let matched = false;
+        
+        if (part.includes(':') || part.includes('=')) {
+            const sep = part.includes(':') ? ':' : '=';
+            const [k, v] = part.split(sep);
+            if (knownKeys[k]) {
+                filters[knownKeys[k]] = v;
+                matched = true;
+            }
+        } else if (knownKeys[part] && i + 1 < parts.length) {
+            filters[knownKeys[part]] = parts[i + 1];
+            i++; 
+            matched = true;
+        }
+        
+        if (!matched) {
+            queryArgs.push(parts[i]);
+        }
+    }
+    
+    return {
+        query: queryArgs.join(' '),
+        filters: filters
+    };
+}
+
+// Combined Omnibox Listener (Handles country prefix + filters)
 chrome.omnibox.onInputEntered.addListener((text, disposition) => {
-    const query = text.trim();
-    if (!query) return;
+    if (!text.trim()) return;
+
+    // Check for country prefix like "fi: tuoli"
+    const countryMatch = text.match(/^(fi|se|no|dk):\s*(.+)$/i);
+    let code = null;
+    let queryText = text.trim();
+
+    if (countryMatch) {
+        code = countryMatch[1].toLowerCase();
+        queryText = countryMatch[2].trim();
+    }
 
     chrome.storage.sync.get('countries', (data) => {
         const countries = data.countries || DEFAULT_SETTINGS.countries;
-        // Find first enabled country
-        let searchUrl = DEFAULT_SETTINGS.countries.fi.url; // fallback
-        for (const code of ['fi', 'se', 'no', 'dk']) {
-            if (countries[code] && countries[code].enabled) {
-                searchUrl = countries[code].url;
-                break;
+        
+        if (!code) {
+            for (const c of ['fi', 'se', 'no', 'dk']) {
+                if (countries[c] && countries[c].enabled) {
+                    code = c; break;
+                }
             }
         }
-
-        const fullUrl = searchUrl + encodeURIComponent(query);
+        if (!code) code = 'fi'; 
+        
+        let presetUrl = (countries[code] && countries[code].url) || DEFAULT_SETTINGS.countries[code].url;
+        let baseUrl = presetUrl.split('?')[0];
+        
+        const parsed = parseOmniboxQuery(queryText);
+        let fullUrl = "";
+        
+        if (typeof buildLekolarSearchUrl !== 'undefined') {
+             fullUrl = buildLekolarSearchUrl(baseUrl, parsed.query, parsed.filters);
+        } else {
+             // Fallback if import missing
+             fullUrl = presetUrl + encodeURIComponent(parsed.query);
+        }
 
         switch (disposition) {
-            case 'currentTab':
-                chrome.tabs.update({ url: fullUrl });
-                break;
-            case 'newForegroundTab':
-                chrome.tabs.create({ url: fullUrl });
-                break;
-            case 'newBackgroundTab':
-                chrome.tabs.create({ url: fullUrl, active: false });
-                break;
+            case 'currentTab': chrome.tabs.update({ url: fullUrl }); break;
+            case 'newForegroundTab': chrome.tabs.create({ url: fullUrl }); break;
+            case 'newBackgroundTab': chrome.tabs.create({ url: fullUrl, active: false }); break;
         }
     });
 });
 
-// Provide suggestions as user types (optional nice-to-have)
+// Provide suggestions as user types
 chrome.omnibox.onInputChanged.addListener((text, suggest) => {
     const query = text.trim();
     if (!query) return;
@@ -81,34 +149,15 @@ chrome.omnibox.onInputChanged.addListener((text, suggest) => {
                 });
             }
         }
-        suggest(suggestions);
-    });
-});
-
-// Handle country-prefixed searches (e.g. "se:matte")
-chrome.omnibox.onInputEntered.addListener((text, disposition) => {
-    const countryMatch = text.match(/^(fi|se|no|dk):(.+)$/i);
-    if (!countryMatch) return; // handled by first listener
-
-    const code = countryMatch[1].toLowerCase();
-    const query = countryMatch[2].trim();
-    if (!query) return;
-
-    chrome.storage.sync.get('countries', (data) => {
-        const countries = data.countries || DEFAULT_SETTINGS.countries;
-        const searchUrl = (countries[code] && countries[code].url) || DEFAULT_SETTINGS.countries[code].url;
-        const fullUrl = searchUrl + encodeURIComponent(query);
-
-        switch (disposition) {
-            case 'currentTab':
-                chrome.tabs.update({ url: fullUrl });
-                break;
-            case 'newForegroundTab':
-                chrome.tabs.create({ url: fullUrl });
-                break;
-            case 'newBackgroundTab':
-                chrome.tabs.create({ url: fullUrl, active: false });
-                break;
+        
+        // Add smart hint if filters are detected
+        if (text.includes(':') || text.includes('=')) {
+             suggestions.unshift({
+                 content: query,
+                 description: `Apply smart filters: ${query}`
+             });
         }
+        
+        suggest(suggestions);
     });
 });

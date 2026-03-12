@@ -20,6 +20,15 @@ const copyButtonsEl = document.getElementById('copyButtons');
 const modifierKeyEl = document.getElementById('modifierKey');
 const saveIndicator = document.getElementById('saveIndicator');
 
+// Smart Search refs
+const smartQueryEl = document.getElementById('smartQuery');
+const smartLengthEl = document.getElementById('smartLength');
+const smartWidthEl = document.getElementById('smartWidth');
+const smartColorEl = document.getElementById('smartColor');
+const smartSeriesEl = document.getElementById('smartSeries');
+const smartEcolabelEl = document.getElementById('smartEcolabel');
+const smartSearchBtn = document.getElementById('smartSearchBtn');
+
 // Country refs
 const countryRadios = {};
 const countryUrls = {};
@@ -101,6 +110,32 @@ COUNTRY_CODES.forEach(code => {
         clearTimeout(urlTimer);
         urlTimer = setTimeout(saveSettings, 500);
     });
+});
+
+// Smart Search Action
+smartSearchBtn.addEventListener('click', () => {
+    // Determine active country baseUrl
+    let baseUrl = 'https://www.lekolar.fi/haku/';
+    for (const code of COUNTRY_CODES) {
+        if (countryRadios[code].checked) {
+            // Strip the '?query=' part if it exists in the preset url
+            baseUrl = countryUrls[code].value.split('?')[0];
+            break;
+        }
+    }
+
+    const query = smartQueryEl.value.trim();
+    const filters = {
+        length: smartLengthEl.value.trim(),
+        width: smartWidthEl.value.trim(),
+        color: smartColorEl.value.trim(),
+        series: smartSeriesEl.value.trim(),
+        ecolabel: smartEcolabelEl.value.trim()
+    };
+
+    // Use global from searchUtils.js
+    const searchUrl = window.buildLekolarSearchUrl(baseUrl, query, filters);
+    chrome.tabs.create({ url: searchUrl });
 });
 
 // Initialize
