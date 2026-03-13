@@ -3,6 +3,7 @@
 const DEFAULTS = {
     infiniteScroll: true,
     copyButtons: true,
+    darkMode: false,
     modifierKey: 'shiftKey',
     countries: {
         fi: { enabled: true, url: 'https://www.lekolar.fi/haku/?query=' },
@@ -17,6 +18,7 @@ const COUNTRY_CODES = ['fi', 'se', 'no', 'dk'];
 // DOM refs
 const infiniteScrollEl = document.getElementById('infiniteScroll');
 const copyButtonsEl = document.getElementById('copyButtons');
+const darkModeEl = document.getElementById('darkMode');
 const modifierKeyEl = document.getElementById('modifierKey');
 const saveIndicator = document.getElementById('saveIndicator');
 
@@ -50,6 +52,7 @@ function loadSettings() {
 
         infiniteScrollEl.checked = settings.infiniteScroll;
         copyButtonsEl.checked = settings.copyButtons;
+        if (darkModeEl) darkModeEl.checked = settings.darkMode;
         modifierKeyEl.value = settings.modifierKey;
 
         // Find which country is enabled and select its radio
@@ -80,6 +83,7 @@ function saveSettings() {
     const settings = {
         infiniteScroll: infiniteScrollEl.checked,
         copyButtons: copyButtonsEl.checked,
+        darkMode: darkModeEl ? darkModeEl.checked : false,
         modifierKey: modifierKeyEl.value,
         countries
     };
@@ -100,6 +104,7 @@ function showSaveIndicator() {
 // Auto-save on change
 infiniteScrollEl.addEventListener('change', saveSettings);
 copyButtonsEl.addEventListener('change', saveSettings);
+if (darkModeEl) darkModeEl.addEventListener('change', saveSettings);
 modifierKeyEl.addEventListener('change', saveSettings);
 
 COUNTRY_CODES.forEach(code => {

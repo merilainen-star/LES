@@ -7,6 +7,10 @@ const PIM_TO_FACET_MAP = {
     depth: 'itemDepth_cm',
     diameter: 'itemDiameter_cm',
     seatHeight: 'itemseatheight_cm',
+    
+    // Explicitly ignore these as Lekolar backend does not support them as facets
+    seatWidth: null,
+    seatDepth: null,
 
     color: 'itemcolortext',
     material: 'itemmaterialfurniture',
@@ -42,8 +46,17 @@ function buildLekolarSearchUrl(baseUrl, query, filters = {}) {
     for (const [key, value] of Object.entries(filters)) {
         if (!value) continue;
         
-        const facetField = PIM_TO_FACET_MAP[key] || key; // fallback to key directly
-        params.push(`facet=${encodeURIComponent(facetField + ':' + value)}`);
+        let facetField = PIM_TO_FACET_MAP[key];
+        if (facetField === null) continue; // Explicitly ignored fields
+        if (facetField === undefined) facetField = key; // Fallback
+        
+        // Lekolar explicitly expects dot for decimals in facet values
+        let processedValue = value;
+        if (typeof processedValue === 'string') {
+            processedValue = processedValue.replace(',', '.');
+        }
+        
+        params.push(`facet=${encodeURIComponent(facetField + ':' + processedValue)}`);
     }
 
     if (params.length > 0) {

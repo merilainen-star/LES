@@ -336,16 +336,20 @@ function findAndInject() {
                         // For "Find Similar", we intentionally exclude Color, Material, Ecolabels, and Series
                         // to ensure we find all variations of the product across different families.
                         
-                        // Parse dimensions (extract first valid number block like "120" or "72,5")
                         const dimMatch = val.match(/\d+(?:[.,]\d+)?/);
                         const dimVal = dimMatch ? dimMatch[0] : null;
 
                         if (dimVal) {
-                            if (key === 'pituus' || key === 'length' || key.includes('pituus:')) filters.length = dimVal;
-                            if (key === 'leveys' || key === 'width' || key.includes('leveys:')) filters.width = dimVal;
-                            if (key === 'korkeus' || key === 'height' || key.includes('korkeus:')) filters.height = dimVal;
-                            if (key === 'halkaisija' || key === 'diameter' || key.includes('halkaisija:')) filters.diameter = dimVal;
-                            if (key === 'istuinkorkeus' || key === 'seat height' || key.includes('istuinkorkeus:')) filters.seatHeight = dimVal;
+                            const isMatch = (word) => new RegExp(`^${word}\\b`).test(key) || key === word || key === `${word}:`;
+                            
+                            if (isMatch('pituus') || isMatch('length')) filters.length = dimVal;
+                            else if (isMatch('istuinkorkeus') || isMatch('seat height')) filters.seatHeight = dimVal;
+                            else if (isMatch('korkeus') || isMatch('height')) filters.height = dimVal;
+                            else if (isMatch('istuinleveys') || isMatch('seat width')) filters.seatWidth = dimVal;
+                            else if (isMatch('leveys') || isMatch('width')) filters.width = dimVal;
+                            else if (isMatch('halkaisija') || isMatch('diameter')) filters.diameter = dimVal;
+                            else if (isMatch('istuinsyvyys') || isMatch('seat depth')) filters.seatDepth = dimVal;
+                            else if (isMatch('syvyys') || isMatch('depth')) filters.depth = dimVal;
                         }
                     }
                 });

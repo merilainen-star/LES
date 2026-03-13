@@ -8,6 +8,7 @@ try {
 const DEFAULT_SETTINGS = {
     infiniteScroll: true,
     copyButtons: true,
+    darkMode: false,
     modifierKey: 'shiftKey',
     countries: {
         fi: { enabled: true, url: 'https://www.lekolar.fi/haku/?query=' },
@@ -25,6 +26,7 @@ chrome.runtime.onInstalled.addListener(() => {
         if (existing && Object.keys(existing).length > 0) {
             if (existing.infiniteScroll !== undefined) merged.infiniteScroll = existing.infiniteScroll;
             if (existing.copyButtons !== undefined) merged.copyButtons = existing.copyButtons;
+            if (existing.darkMode !== undefined) merged.darkMode = existing.darkMode;
             if (existing.modifierKey !== undefined) merged.modifierKey = existing.modifierKey;
             if (existing.countries) {
                 for (const code of ['fi', 'se', 'no', 'dk']) {
