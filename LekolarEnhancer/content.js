@@ -45,6 +45,60 @@ function getProductNumber() {
     return null;
 }
 
+function extractBaseItemNumber(rawNumber) {
+    if (!rawNumber) return null;
+    const cleaned = String(rawNumber).trim().replace(/\s+/g, '');
+    const match = cleaned.match(/\d+(?:-\d+)?/);
+    if (!match) return null;
+    return match[0].split('-')[0];
+}
+
+function getMainProductNumber() {
+    // Prefer structured product data when available.
+    const buyInfo = document.querySelector('.product-page-wrapper .buy-info[data-articlenumber], .product-page .buy-info[data-articlenumber], .js-buyInfo[data-articlenumber]');
+    if (buyInfo && buyInfo.dataset && buyInfo.dataset.articlenumber) {
+        return buyInfo.dataset.articlenumber;
+    }
+
+    // Restrict lookup to the main product detail area to avoid related/upsell products.
+    const productInfoRoot =
+        document.querySelector('.product-info') ||
+        document.querySelector('.product-page .product-info') ||
+        document.querySelector('.product-page-wrapper .product-info') ||
+        document.querySelector('.product-page') ||
+        document.querySelector('.product-page-wrapper');
+    if (!productInfoRoot) return getProductNumber();
+
+    const numberBtn = productInfoRoot.querySelector('.lekolar-copy-btn[data-type="number"]');
+    if (numberBtn && numberBtn.dataset && numberBtn.dataset.value) {
+        return numberBtn.dataset.value;
+    }
+
+    try {
+        const localXPath = ".//*[contains(text(), 'Tuotenro') or contains(text(), 'Art.nr') or contains(text(), 'Varenr')]";
+        const result = document.evaluate(localXPath, productInfoRoot, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
+        for (let i = 0; i < result.snapshotLength; i++) {
+            const element = result.snapshotItem(i);
+            const text = (element.textContent || '').trim();
+            const match = text.match(/(?:Tuotenro|Art\.nr|Varenr)[\.\s:]*\s*([\d-]+)/i);
+            if (match) return match[1];
+
+            let next = element.nextSibling;
+            while (next && (next.nodeType === 8 || (next.nodeType === 3 && !(next.textContent || '').trim()))) {
+                next = next.nextSibling;
+            }
+            if (next && next.textContent) {
+                const numberMatch = next.textContent.trim().match(/^:?\s*([\d-]+)/);
+                if (numberMatch) return numberMatch[1];
+            }
+        }
+    } catch (e) {
+        console.error("LES Error: Failed to find main product number", e);
+    }
+
+    return getProductNumber();
+}
+
 function getProductName() {
     // Only target the main product h1 by looking inside product page wrappers
     const h1 = document.querySelector('.product-info h1, .product-page-wrapper h1, .product-page h1');
@@ -145,7 +199,7 @@ function createCopyButton(textGetter, type) {
 
         if (e[currentSettings.modifierKey]) {
             const name = getProductName();
-            const number = getProductNumber();
+            const number = (type === 'number' && textToCopy) ? textToCopy : getProductNumber();
             const url = window.location.href;
 
             if (name && number) {
@@ -262,144 +316,323 @@ function findAndInject() {
         }
     }
 
-    // 3. Inject "Find Similar" Button
-    if (!document.querySelector('.lekolar-find-similar-btn')) {
-        const h1 = document.querySelector('.product-info h1, .product-page-wrapper h1, .product-page h1');
-        if (h1) {
-            const btn = document.createElement('button');
-            btn.className = 'lekolar-find-similar-btn';
-            btn.title = 'Find similar products based on specifications';
-            
-            const svgNS = 'http://www.w3.org/2000/svg';
-            const svg = document.createElementNS(svgNS, 'svg');
-            svg.setAttribute('xmlns', svgNS);
-            svg.setAttribute('width', '16');
-            svg.setAttribute('height', '16');
-            svg.setAttribute('viewBox', '0 0 24 24');
-            svg.setAttribute('fill', 'none');
-            svg.setAttribute('stroke', 'currentColor');
-            svg.setAttribute('stroke-width', '2');
-            svg.setAttribute('stroke-linecap', 'round');
-            svg.setAttribute('stroke-linejoin', 'round');
-            
-            const circle = document.createElementNS(svgNS, 'circle');
-            circle.setAttribute('cx', '11');
-            circle.setAttribute('cy', '11');
-            circle.setAttribute('r', '8');
-            const line = document.createElementNS(svgNS, 'line');
-            line.setAttribute('x1', '21');
-            line.setAttribute('y1', '21');
-            line.setAttribute('x2', '16.65');
-            line.setAttribute('y2', '16.65');
-            
-            svg.appendChild(circle);
-            svg.appendChild(line);
-            
-            const span = document.createElement('span');
-            span.innerText = ' Find Similar';
-            
-            btn.appendChild(svg);
-            btn.appendChild(span);
-            
-            btn.addEventListener('click', (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                
-                // Extract filters from the current page's specification table
-                const filters = {};
-                document.querySelectorAll('tr, .d-flex, .product-properties li').forEach(row => {
-                    const th = row.querySelector('th, dt, .product-attributes__name, .heading');
-                    let val = '';
-                    
-                    if (row.tagName.toLowerCase() === 'li') {
-                        const valSpan = row.querySelector('span:not(.heading), .color-wrapper');
-                        if (valSpan) {
-                            const colorBubble = valSpan.querySelector('.color-bubble');
-                            if (colorBubble && colorBubble.title) {
-                                val = colorBubble.title;
-                            } else {
-                                val = valSpan.innerText.trim();
-                            }
-                        }
-                    } else {
-                        const td = row.querySelector('td, dd, .product-attributes__value');
-                        if (td) val = td.innerText.trim();
-                    }
+    // 3. Inject Compliance Lookup Button (product pages only)
+    if (!isListPage()) {
+        const mainProductNumber = getMainProductNumber();
+        const baseNumber = extractBaseItemNumber(mainProductNumber);
+        if (baseNumber) {
+            const complianceUrl = `https://lekolarab.sharepoint.com/sites/Compliance/_layouts/15/search.aspx/siteall?q=${encodeURIComponent(baseNumber)}`;
 
-                    if (th && val) {
-                        const key = th.innerText.trim().toLowerCase();
-                        
-                        // Clean up values
-                        // We intentionally OMIT the series filter so we can find tables in *different* series.
-                        // if (key.includes('tuoteperhe') || key.includes('product series')) filters.series = val;
-                        
-                        // For "Find Similar", we intentionally exclude Color, Material, Ecolabels, and Series
-                        // to ensure we find all variations of the product across different families.
-                        
-                        const dimMatch = val.match(/\d+(?:[.,]\d+)?/);
-                        const dimVal = dimMatch ? dimMatch[0] : null;
+            let btn = document.querySelector('.lekolar-compliance-btn');
+            if (!btn) {
+                btn = document.createElement('a');
+                btn.className = 'lekolar-compliance-btn';
+                btn.target = '_blank';
+                btn.rel = 'noopener noreferrer';
 
-                        if (dimVal) {
-                            const isMatch = (word) => new RegExp(`^${word}\\b`).test(key) || key === word || key === `${word}:`;
-                            
-                            if (isMatch('pituus') || isMatch('length')) filters.length = dimVal;
-                            else if (isMatch('istuinkorkeus') || isMatch('seat height')) filters.seatHeight = dimVal;
-                            else if (isMatch('korkeus') || isMatch('height')) filters.height = dimVal;
-                            else if (isMatch('istuinleveys') || isMatch('seat width')) filters.seatWidth = dimVal;
-                            else if (isMatch('leveys') || isMatch('width')) filters.width = dimVal;
-                            else if (isMatch('halkaisija') || isMatch('diameter')) filters.diameter = dimVal;
-                            else if (isMatch('istuinsyvyys') || isMatch('seat depth')) filters.seatDepth = dimVal;
-                            else if (isMatch('syvyys') || isMatch('depth')) filters.depth = dimVal;
-                        }
-                    }
-                });
+                const svgNS = 'http://www.w3.org/2000/svg';
+                const svg = document.createElementNS(svgNS, 'svg');
+                svg.setAttribute('width', '14');
+                svg.setAttribute('height', '14');
+                svg.setAttribute('viewBox', '0 0 24 24');
+                svg.setAttribute('fill', 'none');
+                svg.setAttribute('stroke', 'currentColor');
+                svg.setAttribute('stroke-width', '2');
+                svg.setAttribute('stroke-linecap', 'round');
+                svg.setAttribute('stroke-linejoin', 'round');
+                const clipPath = document.createElementNS(svgNS, 'path');
+                clipPath.setAttribute('d', 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2');
+                const clipRect = document.createElementNS(svgNS, 'rect');
+                clipRect.setAttribute('x', '9');
+                clipRect.setAttribute('y', '3');
+                clipRect.setAttribute('width', '6');
+                clipRect.setAttribute('height', '4');
+                clipRect.setAttribute('rx', '1');
+                const chk1 = document.createElementNS(svgNS, 'line');
+                chk1.setAttribute('x1', '9');
+                chk1.setAttribute('y1', '12');
+                chk1.setAttribute('x2', '11');
+                chk1.setAttribute('y2', '14');
+                const chk2 = document.createElementNS(svgNS, 'line');
+                chk2.setAttribute('x1', '11');
+                chk2.setAttribute('y1', '14');
+                chk2.setAttribute('x2', '15');
+                chk2.setAttribute('y2', '10');
+                svg.appendChild(clipPath);
+                svg.appendChild(clipRect);
+                svg.appendChild(chk1);
+                svg.appendChild(chk2);
 
-                // Instead of jumping to the global /haku/ search which requires a text query,
-                // we will use the product's current category URL as the base for the facets!
-                // Example product URL: https://www.lekolar.fi/verkkokauppa/kaluste/poydat/oppilaspoydat/1238/tuote/
-                // Target category URL: https://www.lekolar.fi/verkkokauppa/kaluste/poydat/oppilaspoydat/
-                
-                let baseUrl = window.location.origin + '/haku/';
-                const pathParts = window.location.pathname.split('/');
-                
-                // If we are deep in a category (verkkokauppa or sortiment), 
-                // step back exactly two levels to reach the main product family/category listing.
-                if (pathParts.includes('verkkokauppa') || pathParts.includes('sortiment')) {
-                    // Remove trailing empty string if exists
-                    if (pathParts[pathParts.length - 1] === '') pathParts.pop();
-                    
-                    const breadcrumbs = Array.from(document.querySelectorAll('.breadcrumbs a, .breadcrumb a'));
-                    if (breadcrumbs.length > 2) {
-                        // The last breadcrumb is usually the specific series (e.g. "1238").
-                        // The second to last link is the broader category (e.g. "Oppilaspöydät").
-                        // By jumping to the broader category, we search ACROSS all series for similar dimensions!
-                        baseUrl = breadcrumbs[breadcrumbs.length - 2].href;
-                        baseUrl = baseUrl.split('?')[0]; 
-                    } else if (breadcrumbs.length > 1) {
-                        baseUrl = breadcrumbs[breadcrumbs.length - 1].href.split('?')[0]; 
-                    } else {
-                        // Fallback: strip last 3 URL segments to try and escape the series folder
-                        pathParts.pop();
-                        pathParts.pop();
-                        pathParts.pop();
-                        baseUrl = window.location.origin + pathParts.join('/') + '/';
-                    }
+                const label = document.createElement('span');
+                label.textContent = 'Look up in Compliance';
+
+                btn.appendChild(svg);
+                btn.appendChild(label);
+            }
+
+            // Always refresh URL/title in case of SPA navigation between product pages.
+            btn.href = complianceUrl;
+            btn.title = `Look up ${baseNumber} in Compliance`;
+
+            // Keep placement at bottom of the Tuotetiedot / product-properties sidebar.
+            const sidebar = document.querySelector('.product-properties, .product-attributes, .product-details-sidebar, .product-specs');
+            if (sidebar && btn.parentElement !== sidebar) {
+                sidebar.appendChild(btn);
+            } else if (!sidebar) {
+                const specsList = document.querySelector('.product-properties ul, .product-attributes ul');
+                if (specsList && btn.parentElement !== specsList.parentElement) {
+                    specsList.parentElement.appendChild(btn);
                 }
-                
-                if (typeof window.buildLekolarSearchUrl === 'function') {
-                    const searchUrl = window.buildLekolarSearchUrl(baseUrl, '', filters);
-                    window.open(searchUrl, '_blank');
-                } else {
-                    console.error("searchUtils.js not loaded.");
-                }
-            });
-
-            h1.appendChild(btn);
+            }
+        } else {
+            const staleBtn = document.querySelector('.lekolar-compliance-btn');
+            if (staleBtn) staleBtn.remove();
         }
+    } else {
+        const staleBtn = document.querySelector('.lekolar-compliance-btn');
+        if (staleBtn) staleBtn.remove();
     }
+
+    // 4. Inject Spec Search (checkboxes + links on spec rows)
+    injectSpecSearch();
 }
 
+// --- Spec Search: make product attributes into searchable links ---
 
+function getSpecSearchBaseUrl() {
+    let baseUrl = window.location.origin + '/haku/';
+    const pathParts = window.location.pathname.split('/');
+
+    if (pathParts.includes('verkkokauppa') || pathParts.includes('sortiment')) {
+        if (pathParts[pathParts.length - 1] === '') pathParts.pop();
+
+        const breadcrumbs = Array.from(document.querySelectorAll('.breadcrumbs a, .breadcrumb a'));
+        if (breadcrumbs.length > 2) {
+            baseUrl = breadcrumbs[breadcrumbs.length - 2].href.split('?')[0];
+        } else if (breadcrumbs.length > 1) {
+            baseUrl = breadcrumbs[breadcrumbs.length - 1].href.split('?')[0];
+        } else {
+            pathParts.pop();
+            pathParts.pop();
+            pathParts.pop();
+            baseUrl = window.location.origin + pathParts.join('/') + '/';
+        }
+    }
+    return baseUrl;
+}
+
+const SPEC_KEYS = [
+    // Dimensions (numeric, need checkbox for combined search)
+    { patterns: ['pituus', 'length', 'längd'], filterKey: 'length', type: 'dimension' },
+    { patterns: ['istuinkorkeus', 'seat height', 'sitthöjd'], filterKey: 'seatHeight', type: 'dimension' },
+    { patterns: ['korkeus', 'height', 'höjd'], filterKey: 'height', type: 'dimension' },
+    { patterns: ['istuinleveys', 'seat width', 'sittbredd'], filterKey: 'seatWidth', type: 'dimension' },
+    { patterns: ['leveys', 'width', 'bredd'], filterKey: 'width', type: 'dimension' },
+    { patterns: ['halkaisija', 'diameter'], filterKey: 'diameter', type: 'dimension' },
+    { patterns: ['istuinsyvyys', 'seat depth', 'sittdjup'], filterKey: 'seatDepth', type: 'dimension' },
+    { patterns: ['syvyys', 'depth', 'djup'], filterKey: 'depth', type: 'dimension' },
+
+    // Text attributes (link-only, no checkbox needed)
+    { patterns: ['väri', 'color', 'colour', 'färg'], filterKey: 'color', type: 'text' },
+    { patterns: ['materiaali', 'material'], filterKey: 'material', type: 'text' },
+    { patterns: ['jalkojen materiaali', 'leg material', 'benmaterial'], filterKey: 'legMaterial', type: 'text' },
+    { patterns: ['ympäristömerkinnät', 'ympäristömerkintä', 'ecolabel', 'miljömärkning'], filterKey: 'ecolabel', type: 'text' },
+    { patterns: ['tuoteperhe', 'product series', 'produktserie'], filterKey: 'series', type: 'text' },
+    { patterns: ['pöytälevyn muoto', 'table top shape', 'bordsskivans form'], filterKey: 'shape', type: 'text' },
+];
+
+function matchSpecKey(labelText) {
+    const lower = labelText.toLowerCase().replace(/:$/, '').trim();
+    for (const spec of SPEC_KEYS) {
+        for (const p of spec.patterns) {
+            if (lower === p || lower.startsWith(p + ' ') || lower.startsWith(p + ':')) {
+                return spec;
+            }
+        }
+    }
+    return null;
+}
+
+function injectSpecSearch() {
+    if (document.querySelector('.les-spec-checkbox, .les-spec-link')) return;
+
+    const rows = document.querySelectorAll('tr, .d-flex, .product-properties li');
+    const matchedRows = [];
+
+    rows.forEach(row => {
+        const th = row.querySelector('th, dt, .product-attributes__name, .heading');
+        if (!th) return;
+
+        let valEl;
+        if (row.tagName.toLowerCase() === 'li') {
+            valEl = row.querySelector('span:not(.heading):not(.color-wrapper)');
+            if (!valEl) {
+                const colorWrapper = row.querySelector('.color-wrapper');
+                if (colorWrapper) {
+                    const bubble = colorWrapper.querySelector('.color-bubble');
+                    if (bubble && bubble.title) {
+                        valEl = colorWrapper;
+                    }
+                }
+            }
+        } else {
+            valEl = row.querySelector('td, dd, .product-attributes__value');
+        }
+        if (!valEl) return;
+
+        const spec = matchSpecKey(th.innerText);
+        if (!spec) return;
+
+        let searchValue;
+        if (spec.type === 'dimension') {
+            const valText = valEl.innerText.trim();
+            const dimMatch = valText.match(/(\d+(?:[.,]\d+)?)/);
+            if (!dimMatch) return;
+            searchValue = dimMatch[1].replace(',', '.');
+        } else {
+            const bubble = valEl.querySelector && valEl.querySelector('.color-bubble');
+            if (bubble && bubble.title) {
+                searchValue = bubble.title.trim();
+            } else {
+                searchValue = valEl.innerText.trim();
+            }
+            if (!searchValue) return;
+        }
+
+        matchedRows.push({ row, th, valEl, searchValue, spec });
+    });
+
+    if (matchedRows.length === 0) return;
+
+    const baseUrl = getSpecSearchBaseUrl();
+    const dimensionRows = matchedRows.filter(r => r.spec.type === 'dimension');
+
+    matchedRows.forEach(({ row, th, valEl, searchValue, spec }) => {
+        if (spec.type === 'dimension') {
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.className = 'les-spec-checkbox';
+            checkbox.dataset.filterKey = spec.filterKey;
+            checkbox.dataset.searchValue = searchValue;
+            checkbox.title = 'Include in dimension search';
+
+            if (th.parentElement === row) {
+                th.insertBefore(checkbox, th.firstChild);
+            } else if (th.parentElement) {
+                th.parentElement.insertBefore(checkbox, th);
+            }
+        }
+
+        if (typeof window.buildLekolarSearchUrl !== 'function') return;
+
+        const fullText = valEl.innerText.trim();
+
+        if (spec.type === 'dimension') {
+            const numericPart = fullText.match(/(\d+(?:[.,]\d+)?)\s*(cm|mm|m)?/);
+            if (!numericPart) return;
+
+            const link = document.createElement('a');
+            link.className = 'les-spec-link';
+            link.href = window.buildLekolarSearchUrl(baseUrl, '', { [spec.filterKey]: searchValue });
+            link.target = '_blank';
+            link.rel = 'noopener noreferrer';
+            link.title = `Search: ${th.innerText.replace(':', '').trim()} ${numericPart[0]}`;
+            link.textContent = numericPart[0];
+
+            const rest = fullText.substring(numericPart.index + numericPart[0].length);
+            valEl.textContent = fullText.substring(0, numericPart.index);
+            valEl.appendChild(link);
+            if (rest) valEl.appendChild(document.createTextNode(rest));
+        } else {
+            const bubble = valEl.querySelector && valEl.querySelector('.color-bubble');
+            if (bubble && bubble.title) {
+                const link = document.createElement('a');
+                link.className = 'les-spec-link';
+                link.href = window.buildLekolarSearchUrl(baseUrl, '', { [spec.filterKey]: searchValue });
+                link.target = '_blank';
+                link.rel = 'noopener noreferrer';
+                link.title = `Search: ${searchValue}`;
+                link.textContent = searchValue;
+                const wrapper = bubble.parentElement;
+                wrapper.parentElement.insertBefore(link, wrapper.nextSibling);
+            } else {
+                const link = document.createElement('a');
+                link.className = 'les-spec-link';
+                link.href = window.buildLekolarSearchUrl(baseUrl, '', { [spec.filterKey]: searchValue });
+                link.target = '_blank';
+                link.rel = 'noopener noreferrer';
+                link.title = `Search: ${th.innerText.replace(':', '').trim()} = ${searchValue}`;
+                link.textContent = fullText;
+                valEl.textContent = '';
+                valEl.appendChild(link);
+            }
+        }
+    });
+
+    if (dimensionRows.length > 0) {
+        const lastDimRow = dimensionRows[dimensionRows.length - 1];
+        const container = document.createElement('span');
+        container.className = 'les-spec-search-container';
+
+        const btn = document.createElement('button');
+        btn.className = 'les-spec-search-btn';
+        btn.title = 'Search by selected dimensions';
+
+        const svgNS = 'http://www.w3.org/2000/svg';
+        const svg = document.createElementNS(svgNS, 'svg');
+        svg.setAttribute('width', '14');
+        svg.setAttribute('height', '14');
+        svg.setAttribute('viewBox', '0 0 24 24');
+        svg.setAttribute('fill', 'none');
+        svg.setAttribute('stroke', 'currentColor');
+        svg.setAttribute('stroke-width', '2');
+        svg.setAttribute('stroke-linecap', 'round');
+        svg.setAttribute('stroke-linejoin', 'round');
+        const circle = document.createElementNS(svgNS, 'circle');
+        circle.setAttribute('cx', '11');
+        circle.setAttribute('cy', '11');
+        circle.setAttribute('r', '8');
+        const line = document.createElementNS(svgNS, 'line');
+        line.setAttribute('x1', '21');
+        line.setAttribute('y1', '21');
+        line.setAttribute('x2', '16.65');
+        line.setAttribute('y2', '16.65');
+        svg.appendChild(circle);
+        svg.appendChild(line);
+
+        const label = document.createElement('span');
+        label.textContent = ' Search';
+
+        btn.appendChild(svg);
+        btn.appendChild(label);
+
+        btn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+
+            const checked = document.querySelectorAll('.les-spec-checkbox:checked');
+            if (checked.length === 0) {
+                btn.classList.add('les-spec-search-shake');
+                setTimeout(() => btn.classList.remove('les-spec-search-shake'), 500);
+                return;
+            }
+
+            const filters = {};
+            checked.forEach(cb => {
+                filters[cb.dataset.filterKey] = cb.dataset.searchValue;
+            });
+
+            if (typeof window.buildLekolarSearchUrl === 'function') {
+                const searchUrl = window.buildLekolarSearchUrl(baseUrl, '', filters);
+                const opened = window.open(searchUrl, '_blank', 'noopener,noreferrer');
+                if (opened) opened.opener = null;
+            }
+        });
+
+        container.appendChild(btn);
+        lastDimRow.valEl.appendChild(container);
+    }
+}
 
 // --- Shared Utility Functions ---
 function findProductGridInDoc(doc) {
