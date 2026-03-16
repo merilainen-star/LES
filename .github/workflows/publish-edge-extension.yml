@@ -23,13 +23,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          fetch-depth: 2
+          fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Detect which folders changed
         id: detect
         run: |
-          CHANGED=$(git diff --name-only HEAD~1 HEAD)
+          if [ "${{ github.event_name }}" = "push" ] && [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]; then
+            CHANGED=$(git diff --name-only ${{ github.event.before }} ${{ github.event.after }})
+          else
+            CHANGED=$(git diff --name-only HEAD~1 HEAD)
+          fi
           echo "$CHANGED"
           echo "firefox_changed=$(echo "$CHANGED" | grep -q '^LekolarEnhancer/' && echo true || echo false)" >> $GITHUB_OUTPUT
           # Treat changes in either Firefox or Edge source as a signal to publish Edge
