@@ -32,7 +32,8 @@ jobs:
           CHANGED=$(git diff --name-only HEAD~1 HEAD)
           echo "$CHANGED"
           echo "firefox_changed=$(echo "$CHANGED" | grep -q '^LekolarEnhancer/' && echo true || echo false)" >> $GITHUB_OUTPUT
-          echo "edge_changed=$(echo "$CHANGED" | grep -q '^LekolarEnhancer-Edge/' && echo true || echo false)" >> $GITHUB_OUTPUT
+          # Treat changes in either Firefox or Edge source as a signal to publish Edge
+          echo "edge_changed=$(echo "$CHANGED" | grep -Eq '^(LekolarEnhancer/|LekolarEnhancer-Edge/)' && echo true || echo false)" >> $GITHUB_OUTPUT
 
       - name: Bump patch version in both manifests
         id: bump
