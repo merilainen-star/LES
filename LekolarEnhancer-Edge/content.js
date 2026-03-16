@@ -45,6 +45,60 @@ function getProductNumber() {
     return null;
 }
 
+function extractBaseItemNumber(rawNumber) {
+    if (!rawNumber) return null;
+    const cleaned = String(rawNumber).trim().replace(/\s+/g, '');
+    const match = cleaned.match(/\d+(?:-\d+)?/);
+    if (!match) return null;
+    return match[0].split('-')[0];
+}
+
+function getMainProductNumber() {
+    // Prefer structured product data when available.
+    const buyInfo = document.querySelector('.product-page-wrapper .buy-info[data-articlenumber], .product-page .buy-info[data-articlenumber], .js-buyInfo[data-articlenumber]');
+    if (buyInfo && buyInfo.dataset && buyInfo.dataset.articlenumber) {
+        return buyInfo.dataset.articlenumber;
+    }
+
+    // Restrict lookup to the main product detail area to avoid related/upsell products.
+    const productInfoRoot =
+        document.querySelector('.product-info') ||
+        document.querySelector('.product-page .product-info') ||
+        document.querySelector('.product-page-wrapper .product-info') ||
+        document.querySelector('.product-page') ||
+        document.querySelector('.product-page-wrapper');
+    if (!productInfoRoot) return getProductNumber();
+
+    const numberBtn = productInfoRoot.querySelector('.lekolar-copy-btn[data-type="number"]');
+    if (numberBtn && numberBtn.dataset && numberBtn.dataset.value) {
+        return numberBtn.dataset.value;
+    }
+
+    try {
+        const localXPath = ".//*[contains(text(), 'Tuotenro') or contains(text(), 'Art.nr') or contains(text(), 'Varenr')]";
+        const result = document.evaluate(localXPath, productInfoRoot, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
+        for (let i = 0; i < result.snapshotLength; i++) {
+            const element = result.snapshotItem(i);
+            const text = (element.textContent || '').trim();
+            const match = text.match(/(?:Tuotenro|Art\.nr|Varenr)[\.\s:]*\s*([\d-]+)/i);
+            if (match) return match[1];
+
+            let next = element.nextSibling;
+            while (next && (next.nodeType === 8 || (next.nodeType === 3 && !(next.textContent || '').trim()))) {
+                next = next.nextSibling;
+            }
+            if (next && next.textContent) {
+                const numberMatch = next.textContent.trim().match(/^:?\s*([\d-]+)/);
+                if (numberMatch) return numberMatch[1];
+            }
+        }
+    } catch (e) {
+        console.error("LES Error: Failed to find main product number", e);
+    }
+
+    return getProductNumber();
+}
+
 function getProductName() {
     // Only target the main product h1 by looking inside product page wrappers
     const h1 = document.querySelector('.product-info h1, .product-page-wrapper h1, .product-page h1');
@@ -60,13 +114,45 @@ function createCopyButton(textGetter, type) {
     const initialValue = getValue();
     if (initialValue) button.dataset.value = initialValue;
 
-    button.innerHTML = `
-        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-copy">
-            <rect x="5" y="5" width="13" height="13" rx="2" ry="2"></rect>
-            <rect x="9" y="9" width="13" height="13" rx="2" ry="2" fill="white"></rect>
-        </svg>
-        <span class="tooltip">Copy ${type}</span>
-    `;
+    const svgNS = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(svgNS, 'svg');
+    svg.setAttribute('xmlns', svgNS);
+    svg.setAttribute('width', '16');
+    svg.setAttribute('height', '16');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('fill', 'none');
+    svg.setAttribute('stroke', 'currentColor');
+    svg.setAttribute('stroke-width', '2');
+    svg.setAttribute('stroke-linecap', 'round');
+    svg.setAttribute('stroke-linejoin', 'round');
+    svg.classList.add('feather', 'feather-copy');
+
+    const rect1 = document.createElementNS(svgNS, 'rect');
+    rect1.setAttribute('x', '5');
+    rect1.setAttribute('y', '5');
+    rect1.setAttribute('width', '13');
+    rect1.setAttribute('height', '13');
+    rect1.setAttribute('rx', '2');
+    rect1.setAttribute('ry', '2');
+
+    const rect2 = document.createElementNS(svgNS, 'rect');
+    rect2.setAttribute('x', '9');
+    rect2.setAttribute('y', '9');
+    rect2.setAttribute('width', '13');
+    rect2.setAttribute('height', '13');
+    rect2.setAttribute('rx', '2');
+    rect2.setAttribute('ry', '2');
+    rect2.setAttribute('fill', 'white');
+
+    svg.appendChild(rect1);
+    svg.appendChild(rect2);
+
+    const tooltip = document.createElement('span');
+    tooltip.className = 'tooltip';
+    tooltip.textContent = `Copy ${type}`;
+
+    button.appendChild(svg);
+    button.appendChild(tooltip);
 
     // Shared helper to update tooltip based on modifier key state
     function updateTooltip(isModifier) {
@@ -113,7 +199,7 @@ function createCopyButton(textGetter, type) {
 
         if (e[currentSettings.modifierKey]) {
             const name = getProductName();
-            const number = getProductNumber();
+            const number = (type === 'number' && textToCopy) ? textToCopy : getProductNumber();
             const url = window.location.href;
 
             if (name && number) {
@@ -229,11 +315,598 @@ function findAndInject() {
             h1.appendChild(btn);
         }
     }
+
+    // 3. Inject Compliance Lookup Button (product pages only)
+    if (!isListPage()) {
+        const mainProductNumber = getMainProductNumber();
+        const baseNumber = extractBaseItemNumber(mainProductNumber);
+        if (baseNumber) {
+            const complianceUrl = `https://lekolarab.sharepoint.com/sites/Compliance/_layouts/15/search.aspx/siteall?q=${encodeURIComponent(baseNumber)}`;
+
+            let btn = document.querySelector('.lekolar-compliance-btn');
+            if (!btn) {
+                btn = document.createElement('a');
+                btn.className = 'lekolar-compliance-btn';
+                btn.target = '_blank';
+                btn.rel = 'noopener noreferrer';
+
+                const svgNS = 'http://www.w3.org/2000/svg';
+                const svg = document.createElementNS(svgNS, 'svg');
+                svg.setAttribute('width', '14');
+                svg.setAttribute('height', '14');
+                svg.setAttribute('viewBox', '0 0 24 24');
+                svg.setAttribute('fill', 'none');
+                svg.setAttribute('stroke', 'currentColor');
+                svg.setAttribute('stroke-width', '2');
+                svg.setAttribute('stroke-linecap', 'round');
+                svg.setAttribute('stroke-linejoin', 'round');
+                const clipPath = document.createElementNS(svgNS, 'path');
+                clipPath.setAttribute('d', 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2');
+                const clipRect = document.createElementNS(svgNS, 'rect');
+                clipRect.setAttribute('x', '9');
+                clipRect.setAttribute('y', '3');
+                clipRect.setAttribute('width', '6');
+                clipRect.setAttribute('height', '4');
+                clipRect.setAttribute('rx', '1');
+                const chk1 = document.createElementNS(svgNS, 'line');
+                chk1.setAttribute('x1', '9');
+                chk1.setAttribute('y1', '12');
+                chk1.setAttribute('x2', '11');
+                chk1.setAttribute('y2', '14');
+                const chk2 = document.createElementNS(svgNS, 'line');
+                chk2.setAttribute('x1', '11');
+                chk2.setAttribute('y1', '14');
+                chk2.setAttribute('x2', '15');
+                chk2.setAttribute('y2', '10');
+                svg.appendChild(clipPath);
+                svg.appendChild(clipRect);
+                svg.appendChild(chk1);
+                svg.appendChild(chk2);
+
+                const label = document.createElement('span');
+                label.textContent = 'Look up in Compliance';
+
+                btn.appendChild(svg);
+                btn.appendChild(label);
+            }
+
+            // Always refresh URL/title in case of SPA navigation between product pages.
+            btn.href = complianceUrl;
+            btn.title = `Look up ${baseNumber} in Compliance`;
+
+            // Keep placement at bottom of the Tuotetiedot / product-properties sidebar.
+            const sidebar = document.querySelector('.product-properties, .product-attributes, .product-details-sidebar, .product-specs');
+            if (sidebar && btn.parentElement !== sidebar) {
+                sidebar.appendChild(btn);
+            } else if (!sidebar) {
+                const specsList = document.querySelector('.product-properties ul, .product-attributes ul');
+                if (specsList && btn.parentElement !== specsList.parentElement) {
+                    specsList.parentElement.appendChild(btn);
+                }
+            }
+        } else {
+            const staleBtn = document.querySelector('.lekolar-compliance-btn');
+            if (staleBtn) staleBtn.remove();
+        }
+    } else {
+        const staleBtn = document.querySelector('.lekolar-compliance-btn');
+        if (staleBtn) staleBtn.remove();
+    }
+
+    // 4. Inject Spec Search (checkboxes + links on spec rows)
+    injectSpecSearch();
 }
 
+// --- Spec Search: make product attributes into searchable links ---
 
+function getSpecSearchBaseUrl() {
+    let baseUrl = window.location.origin + '/haku/';
+    const pathParts = window.location.pathname.split('/');
 
-// --- Search Consolidation Logic (Infinite Scroll) ---
+    if (pathParts.includes('verkkokauppa') || pathParts.includes('sortiment')) {
+        if (pathParts[pathParts.length - 1] === '') pathParts.pop();
+
+        const breadcrumbs = Array.from(document.querySelectorAll('.breadcrumbs a, .breadcrumb a'));
+        if (breadcrumbs.length > 2) {
+            baseUrl = breadcrumbs[breadcrumbs.length - 2].href.split('?')[0];
+        } else if (breadcrumbs.length > 1) {
+            baseUrl = breadcrumbs[breadcrumbs.length - 1].href.split('?')[0];
+        } else {
+            pathParts.pop();
+            pathParts.pop();
+            pathParts.pop();
+            baseUrl = window.location.origin + pathParts.join('/') + '/';
+        }
+    }
+    return baseUrl;
+}
+
+const SPEC_KEYS = [
+    // Dimensions (numeric, need checkbox for combined search)
+    { patterns: ['pituus', 'length', 'längd'], filterKey: 'length', type: 'dimension' },
+    { patterns: ['istuinkorkeus', 'seat height', 'sitthöjd'], filterKey: 'seatHeight', type: 'dimension' },
+    { patterns: ['korkeus', 'height', 'höjd'], filterKey: 'height', type: 'dimension' },
+    { patterns: ['istuinleveys', 'seat width', 'sittbredd'], filterKey: 'seatWidth', type: 'dimension' },
+    { patterns: ['leveys', 'width', 'bredd'], filterKey: 'width', type: 'dimension' },
+    { patterns: ['halkaisija', 'diameter'], filterKey: 'diameter', type: 'dimension' },
+    { patterns: ['istuinsyvyys', 'seat depth', 'sittdjup'], filterKey: 'seatDepth', type: 'dimension' },
+    { patterns: ['syvyys', 'depth', 'djup'], filterKey: 'depth', type: 'dimension' },
+
+    // Text attributes (link-only, no checkbox needed)
+    { patterns: ['väri', 'color', 'colour', 'färg'], filterKey: 'color', type: 'text' },
+    { patterns: ['materiaali', 'material'], filterKey: 'material', type: 'text' },
+    { patterns: ['jalkojen materiaali', 'leg material', 'benmaterial'], filterKey: 'legMaterial', type: 'text' },
+    { patterns: ['ympäristömerkinnät', 'ympäristömerkintä', 'ecolabel', 'miljömärkning'], filterKey: 'ecolabel', type: 'text' },
+    { patterns: ['tuoteperhe', 'product series', 'produktserie'], filterKey: 'series', type: 'text' },
+    { patterns: ['pöytälevyn muoto', 'table top shape', 'bordsskivans form'], filterKey: 'shape', type: 'text' },
+];
+
+function matchSpecKey(labelText) {
+    const lower = labelText.toLowerCase().replace(/:$/, '').trim();
+    for (const spec of SPEC_KEYS) {
+        for (const p of spec.patterns) {
+            if (lower === p || lower.startsWith(p + ' ') || lower.startsWith(p + ':')) {
+                return spec;
+            }
+        }
+    }
+    return null;
+}
+
+function injectSpecSearch() {
+    if (document.querySelector('.les-spec-checkbox, .les-spec-link')) return;
+
+    const rows = document.querySelectorAll('tr, .d-flex, .product-properties li');
+    const matchedRows = [];
+
+    rows.forEach(row => {
+        const th = row.querySelector('th, dt, .product-attributes__name, .heading');
+        if (!th) return;
+
+        let valEl;
+        if (row.tagName.toLowerCase() === 'li') {
+            valEl = row.querySelector('span:not(.heading):not(.color-wrapper)');
+            if (!valEl) {
+                const colorWrapper = row.querySelector('.color-wrapper');
+                if (colorWrapper) {
+                    const bubble = colorWrapper.querySelector('.color-bubble');
+                    if (bubble && bubble.title) {
+                        valEl = colorWrapper;
+                    }
+                }
+            }
+        } else {
+            valEl = row.querySelector('td, dd, .product-attributes__value');
+        }
+        if (!valEl) return;
+
+        const spec = matchSpecKey(th.innerText);
+        if (!spec) return;
+
+        let searchValue;
+        if (spec.type === 'dimension') {
+            const valText = valEl.innerText.trim();
+            const dimMatch = valText.match(/(\d+(?:[.,]\d+)?)/);
+            if (!dimMatch) return;
+            searchValue = dimMatch[1].replace(',', '.');
+        } else {
+            const bubble = valEl.querySelector && valEl.querySelector('.color-bubble');
+            if (bubble && bubble.title) {
+                searchValue = bubble.title.trim();
+            } else {
+                searchValue = valEl.innerText.trim();
+            }
+            if (!searchValue) return;
+        }
+
+        matchedRows.push({ row, th, valEl, searchValue, spec });
+    });
+
+    if (matchedRows.length === 0) return;
+
+    const baseUrl = getSpecSearchBaseUrl();
+    const dimensionRows = matchedRows.filter(r => r.spec.type === 'dimension');
+
+    matchedRows.forEach(({ row, th, valEl, searchValue, spec }) => {
+        if (spec.type === 'dimension') {
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.className = 'les-spec-checkbox';
+            checkbox.dataset.filterKey = spec.filterKey;
+            checkbox.dataset.searchValue = searchValue;
+            checkbox.title = 'Include in dimension search';
+
+            if (th.parentElement === row) {
+                th.insertBefore(checkbox, th.firstChild);
+            } else if (th.parentElement) {
+                th.parentElement.insertBefore(checkbox, th);
+            }
+        }
+
+        if (typeof window.buildLekolarSearchUrl !== 'function') return;
+
+        const fullText = valEl.innerText.trim();
+
+        if (spec.type === 'dimension') {
+            const numericPart = fullText.match(/(\d+(?:[.,]\d+)?)\s*(cm|mm|m)?/);
+            if (!numericPart) return;
+
+            const link = document.createElement('a');
+            link.className = 'les-spec-link';
+            link.href = window.buildLekolarSearchUrl(baseUrl, '', { [spec.filterKey]: searchValue });
+            link.target = '_blank';
+            link.rel = 'noopener noreferrer';
+            link.title = `Search: ${th.innerText.replace(':', '').trim()} ${numericPart[0]}`;
+            link.textContent = numericPart[0];
+
+            const rest = fullText.substring(numericPart.index + numericPart[0].length);
+            valEl.textContent = fullText.substring(0, numericPart.index);
+            valEl.appendChild(link);
+            if (rest) valEl.appendChild(document.createTextNode(rest));
+        } else {
+            const bubble = valEl.querySelector && valEl.querySelector('.color-bubble');
+            if (bubble && bubble.title) {
+                const link = document.createElement('a');
+                link.className = 'les-spec-link';
+                link.href = window.buildLekolarSearchUrl(baseUrl, '', { [spec.filterKey]: searchValue });
+                link.target = '_blank';
+                link.rel = 'noopener noreferrer';
+                link.title = `Search: ${searchValue}`;
+                link.textContent = searchValue;
+                const wrapper = bubble.parentElement;
+                wrapper.parentElement.insertBefore(link, wrapper.nextSibling);
+            } else {
+                const link = document.createElement('a');
+                link.className = 'les-spec-link';
+                link.href = window.buildLekolarSearchUrl(baseUrl, '', { [spec.filterKey]: searchValue });
+                link.target = '_blank';
+                link.rel = 'noopener noreferrer';
+                link.title = `Search: ${th.innerText.replace(':', '').trim()} = ${searchValue}`;
+                link.textContent = fullText;
+                valEl.textContent = '';
+                valEl.appendChild(link);
+            }
+        }
+    });
+
+    if (dimensionRows.length > 0) {
+        const lastDimRow = dimensionRows[dimensionRows.length - 1];
+        const container = document.createElement('span');
+        container.className = 'les-spec-search-container';
+
+        const btn = document.createElement('button');
+        btn.className = 'les-spec-search-btn';
+        btn.title = 'Search by selected dimensions';
+
+        const svgNS = 'http://www.w3.org/2000/svg';
+        const svg = document.createElementNS(svgNS, 'svg');
+        svg.setAttribute('width', '14');
+        svg.setAttribute('height', '14');
+        svg.setAttribute('viewBox', '0 0 24 24');
+        svg.setAttribute('fill', 'none');
+        svg.setAttribute('stroke', 'currentColor');
+        svg.setAttribute('stroke-width', '2');
+        svg.setAttribute('stroke-linecap', 'round');
+        svg.setAttribute('stroke-linejoin', 'round');
+        const circle = document.createElementNS(svgNS, 'circle');
+        circle.setAttribute('cx', '11');
+        circle.setAttribute('cy', '11');
+        circle.setAttribute('r', '8');
+        const line = document.createElementNS(svgNS, 'line');
+        line.setAttribute('x1', '21');
+        line.setAttribute('y1', '21');
+        line.setAttribute('x2', '16.65');
+        line.setAttribute('y2', '16.65');
+        svg.appendChild(circle);
+        svg.appendChild(line);
+
+        const label = document.createElement('span');
+        label.textContent = ' Search';
+
+        btn.appendChild(svg);
+        btn.appendChild(label);
+
+        btn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+
+            const checked = document.querySelectorAll('.les-spec-checkbox:checked');
+            if (checked.length === 0) {
+                btn.classList.add('les-spec-search-shake');
+                setTimeout(() => btn.classList.remove('les-spec-search-shake'), 500);
+                return;
+            }
+
+            const filters = {};
+            checked.forEach(cb => {
+                filters[cb.dataset.filterKey] = cb.dataset.searchValue;
+            });
+
+            if (typeof window.buildLekolarSearchUrl === 'function') {
+                const searchUrl = window.buildLekolarSearchUrl(baseUrl, '', filters);
+                const opened = window.open(searchUrl, '_blank', 'noopener,noreferrer');
+                if (opened) opened.opener = null;
+            }
+        });
+
+        container.appendChild(btn);
+        lastDimRow.valEl.appendChild(container);
+    }
+}
+
+// --- Shared Utility Functions ---
+function findProductGridInDoc(doc) {
+    const root = doc || document;
+
+    const isInNavOrHeader = (el) => {
+        let cur = el;
+        while (cur && cur !== root.body) {
+            const tag = cur.tagName.toLowerCase();
+            if (tag === 'header' || tag === 'footer' || tag === 'nav') return true;
+            if (cur.getAttribute('role') === 'navigation') return true;
+            cur = cur.parentElement;
+        }
+        return false;
+    };
+
+    const knownSelectors = [
+        '.product-tiles-grid',
+        '.product-tiles',
+        '.product-list',
+        '.products-grid',
+        '.product-grid',
+        '[class*="product-tiles"]',
+    ];
+    for (const sel of knownSelectors) {
+        const el = root.querySelector(sel);
+        if (el && !isInNavOrHeader(el)) {
+            const productChildCount = Array.from(el.children).filter(child =>
+                child.querySelector('a[href*="/verkkokauppa/"], a[href*="/sortiment/"]') && (child.textContent || '').trim().length > 10
+            ).length;
+            if (productChildCount > 0) return el;
+        }
+    }
+
+    const mainContent = root.querySelector('main') || root.body;
+    if (!mainContent) return null;
+    const allDivs = mainContent.querySelectorAll('div, ul, section');
+    let bestContainer = null;
+    let maxProductChildren = 0;
+
+    allDivs.forEach(div => {
+        if (isInNavOrHeader(div)) return;
+        // Skip hidden elements if checking main document
+        if (!doc && div.offsetWidth === 0) return;
+        if (doc && div.className && (div.className.includes('mobileOnly') || div.className.includes('mobile-only'))) return;
+
+        let productChildrenCount = 0;
+        Array.from(div.children).forEach(child => {
+            if (child.querySelector('a[href*="/verkkokauppa/"], a[href*="/sortiment/"]') && (child.textContent || '').trim().length > 10) {
+                productChildrenCount++;
+            }
+        });
+
+        if (productChildrenCount > maxProductChildren) {
+            maxProductChildren = productChildrenCount;
+            bestContainer = div;
+        }
+    });
+
+    if (maxProductChildren > 2) {
+        return bestContainer;
+    }
+
+    return null;
+}
+
+// --- Price Sorting for Sales Reps ---
+
+let isPriceSortActive = false;
+let originalGridContent = null;
+let allSortedCards = [];
+
+function extractPriceFromCard(card) {
+    const priceTokens = [];
+    const elements = card.querySelectorAll('.price, .product-price, .sales-price, [class*="price"], .amount');
+    
+    for (const el of elements) {
+        if (el.offsetParent === null && el.closest('.hidden')) continue;
+        const text = el.innerText.trim();
+        if (text) priceTokens.push(text);
+    }
+    
+    if (priceTokens.length === 0) {
+        const lines = card.innerText.split('\n');
+        for (const line of lines) {
+            if (/(€|kr|sek|nok|dkk)/i.test(line) && /\d/.test(line)) {
+                priceTokens.push(line);
+            }
+        }
+    }
+    
+    for (const text of priceTokens) {
+        let cleanText = text.replace(/\s+/g, '').replace(',', '.');
+        const match = cleanText.match(/\d+(\.\d+)?/);
+        if (match) {
+            return parseFloat(match[0]);
+        }
+    }
+    return null;
+}
+
+async function performPriceSort(order, gridContainer) {
+    if (!gridContainer) return;
+    
+    isPriceSortActive = true;
+    
+    let overlay = document.getElementById('lekolar-sort-overlay');
+    if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.id = 'lekolar-sort-overlay';
+        overlay.className = 'lekolar-loading-overlay';
+        
+        const spinner = document.createElement('div');
+        spinner.className = 'lekolar-spinner';
+        
+        const text = document.createElement('div');
+        text.className = 'lekolar-loading-text';
+        text.innerText = 'Fetching all pages for sorting...';
+        
+        overlay.appendChild(spinner);
+        overlay.appendChild(text);
+        document.body.appendChild(overlay);
+    }
+    overlay.style.display = 'flex';
+    
+    try {
+        const urlParams = new URL(window.location.href).searchParams;
+        let startPage = 1;
+        if (urlParams.get('page')) startPage = parseInt(urlParams.get('page'));
+        
+        let currentCards = Array.from(gridContainer.children).filter(child => child.matches(PRODUCT_CARD_SELECTOR));
+        
+        let fetchPage = startPage + 1;
+        let keepFetching = true;
+        
+        if (allSortedCards.length === 0 || allSortedCards.length < currentCards.length) {
+            const textEl = overlay.querySelector('.lekolar-loading-text');
+            
+            while (keepFetching) {
+                if (textEl) textEl.innerText = `Fetching page ${fetchPage} for sorting...`;
+                
+                const currentUrl = new URL(window.location.href);
+                currentUrl.searchParams.set('page', fetchPage);
+                const nextUrl = currentUrl.toString();
+                
+                const response = await fetch(nextUrl);
+                if (!response.ok) {
+                    keepFetching = false;
+                    break;
+                }
+                
+                const text = await response.text();
+                const parser = new DOMParser();
+                const doc = parser.parseFromString(text, 'text/html');
+                
+                const fetchedContainer = findProductGridInDoc(doc);
+                if (!fetchedContainer || fetchedContainer.children.length === 0) {
+                    keepFetching = false;
+                    break;
+                }
+                
+                const newItems = Array.from(fetchedContainer.children).filter(child => child.matches(PRODUCT_CARD_SELECTOR));
+                if (newItems.length === 0) {
+                    keepFetching = false;
+                    break;
+                }
+                
+                newItems.forEach(item => {
+                    const importedNode = document.importNode(item, true);
+                    currentCards.push(importedNode);
+                });
+                
+                fetchPage++;
+            }
+        } else {
+            currentCards = allSortedCards;
+        }
+        
+        const cardsWithPrices = currentCards.map(card => {
+            return {
+                element: card,
+                price: extractPriceFromCard(card) || 99999999 
+            };
+        });
+        
+        cardsWithPrices.sort((a, b) => {
+            if (order === 'asc') return a.price - b.price;
+            if (order === 'desc') return b.price - a.price;
+            return 0;
+        });
+        
+        allSortedCards = cardsWithPrices.map(c => c.element);
+        
+        if (!originalGridContent) {
+            originalGridContent = Array.from(gridContainer.children);
+        }
+        
+        gridContainer.innerHTML = '';
+        allSortedCards.forEach(card => gridContainer.appendChild(card));
+        
+        overlay.style.display = 'none';
+        
+        setTimeout(() => {
+            if (currentSettings.copyButtons) {
+                findAndInject();
+                observeNewProductCards();
+            }
+        }, 150);
+        
+    } catch (e) {
+        console.error("Sorting error:", e);
+        const textEl = overlay.querySelector('.lekolar-loading-text');
+        if (textEl) textEl.innerText = 'Error sorting: ' + e.message;
+        setTimeout(() => { overlay.style.display = 'none'; }, 2000);
+    }
+}
+
+function initPriceSorting() {
+    const isSearch = (window.location.pathname.includes('/haku/') || window.location.pathname.includes('/sok/') || window.location.pathname.includes('/sog/')) && window.location.search.includes('query=');
+    const isCategory = window.location.pathname.includes('/verkkokauppa/') || window.location.pathname.includes('/sortiment/');
+    if (!isSearch && !isCategory) return;
+    
+    if (document.querySelector('.lekolar-sort-container')) return;
+
+    const allCards = document.querySelectorAll(PRODUCT_CARD_SELECTOR);
+    if (!allCards || allCards.length === 0) return;
+    
+    let pricesFound = 0;
+    for (let i = 0; i < Math.min(allCards.length, 5); i++) {
+        if (extractPriceFromCard(allCards[i]) !== null) {
+            pricesFound++;
+        }
+    }
+    
+    if (pricesFound === 0) return; 
+    
+    const container = document.createElement('div');
+    container.className = 'lekolar-sort-container';
+    
+    const label = document.createElement('label');
+    label.innerText = 'Sort: ';
+    label.setAttribute('for', 'lekolar-price-sort');
+    
+    const select = document.createElement('select');
+    select.id = 'lekolar-price-sort';
+    select.className = 'lekolar-sort-select';
+    select.innerHTML = `
+        <option value="">Default</option>
+        <option value="asc">Price: Low to High</option>
+        <option value="desc">Price: High to Low</option>
+    `;
+    
+    container.appendChild(label);
+    container.appendChild(select);
+    
+    const gridContainer = findProductGridInDoc(document);
+    if (!gridContainer) return;
+
+    let target = gridContainer.previousElementSibling;
+    if (target && target.className && target.className.includes('header')) {
+        target.appendChild(container);
+    } else {
+        gridContainer.parentNode.insertBefore(container, gridContainer);
+    }
+    
+    select.addEventListener('change', async (e) => {
+        const value = e.target.value;
+        if (!value) {
+            window.location.reload();
+            return;
+        }
+        await performPriceSort(value, gridContainer);
+    });
+}
 
 function initSearchConsolidation() {
     // Run on search pages AND category pages
@@ -246,33 +919,58 @@ function initSearchConsolidation() {
         return;
     }
 
+    // Only run if we haven't already injected the sentinel
+    if (document.getElementById('lekolar-infinite-scroll-sentinel')) return;
+
+    // Helper: check if an element is inside header/nav/footer (should be excluded from grid search)
+    const isInNavOrHeader = (el) => {
+        let cur = el;
+        while (cur && cur !== document.body) {
+            const tag = cur.tagName.toLowerCase();
+            if (tag === 'header' || tag === 'footer' || tag === 'nav') return true;
+            if (cur.getAttribute('role') === 'navigation') return true;
+            cur = cur.parentElement;
+        }
+        return false;
+    };
+
     // Heuristic to find the product grid container
-    const findProductGrid = () => {
-        const productLinks = document.querySelectorAll('a[href*="/verkkokauppa/"], a[href*="/sortiment/"]');
-        if (productLinks.length === 0) return null;
+    const findProductGrid = (doc) => {
+        const root = doc || document;
 
-        const parentCounts = new Map();
-        productLinks.forEach(link => {
-            let current = link;
-            for (let i = 0; i < 5; i++) {
-                if (!current.parentElement) break;
-                current = current.parentElement;
-                const tag = current.tagName.toLowerCase();
-                if (tag === 'div' || tag === 'ul' || tag === 'section') {
-                    parentCounts.set(current, (parentCounts.get(current) || 0) + 1);
-                }
+        // 1. Try specific known Lekolar product grid selectors first
+        const knownSelectors = [
+            '.product-tiles-grid',
+            '.product-tiles',
+            '.product-list',
+            '.products-grid',
+            '.product-grid',
+            '[class*="product-tiles"]',
+        ];
+        for (const sel of knownSelectors) {
+            const el = root.querySelector(sel);
+            if (el && !isInNavOrHeader(el)) {
+                // Verify it has actual product card children
+                const productChildCount = Array.from(el.children).filter(child =>
+                    child.querySelector('a[href*="/verkkokauppa/"], a[href*="/sortiment/"]') && (child.textContent || '').trim().length > 10
+                ).length;
+                if (productChildCount > 0) return el;
             }
-        });
+        }
 
-        // Only run if we haven't already injected the sentinel
-        if (document.getElementById('lekolar-infinite-scroll-sentinel')) return null;
-
-        const mainContent = document.querySelector('main') || document.body;
+        // 2. Fallback heuristic — count direct children with product links,
+        //    but skip any container that lives inside header/nav/footer
+        const mainContent = root.querySelector('main') || root.body;
+        if (!mainContent) return null;
         const allDivs = mainContent.querySelectorAll('div, ul, section');
         let bestContainer = null;
         let maxProductChildren = 0;
 
         allDivs.forEach(div => {
+            if (isInNavOrHeader(div)) return; // Skip nav/header elements
+            // Skip hidden elements (e.g. mobileOnly containers hidden via CSS)
+            if (div.offsetWidth === 0) return;
+
             let productChildrenCount = 0;
             Array.from(div.children).forEach(child => {
                 if (child.querySelector('a[href*="/verkkokauppa/"], a[href*="/sortiment/"]') && child.innerText.length > 10) {
@@ -306,9 +1004,12 @@ function initSearchConsolidation() {
         if (pageLinks.length > 0) return true;
 
         // Check for specific text like "Next" or ">"
+        // VERY IMPORTANT: Use textContent instead of innerText here to prevent massive layout thrashing
+        // which completely freezes the browser on pages with many links!
         const allLinks = document.querySelectorAll('a');
         for (let link of allLinks) {
-            if (link.innerText.includes('Seuraava') || link.innerText.includes('Nästa') || link.innerText.includes('Neste') || link.innerText.includes('Næste') || link.innerText.trim() === '>' || link.innerText.trim() === '›') {
+            const text = (link.textContent || '').trim();
+            if (text.includes('Seuraava') || text.includes('Nästa') || text.includes('Neste') || text.includes('Næste') || text === '>' || text === '›') {
                 return true;
             }
         }
@@ -323,7 +1024,7 @@ function initSearchConsolidation() {
         return;
     }
 
-    const container = findProductGrid();
+    const container = findProductGrid(null);
 
 
     if (container) {
@@ -356,6 +1057,7 @@ function initSearchConsolidation() {
         let hasMore = true;
 
         const observer = new IntersectionObserver(async (entries) => {
+            if (isPriceSortActive) return;
             if (entries[0].isIntersecting && !isLoading && hasMore) {
                 isLoading = true;
                 sentinel.innerText = 'Initializing fetch...';
@@ -406,26 +1108,8 @@ async function loadNextPage(gridContainer, page, debugElement) {
         const parser = new DOMParser();
         const doc = parser.parseFromString(text, 'text/html');
 
-        const fetchedMain = doc.querySelector('main') || doc.body;
-        const fetchedDivs = fetchedMain.querySelectorAll('div, ul, section');
-        let fetchedContainer = null;
-        let maxChildren = 0;
-
-        // Debug: count candidates
-        let candidates = 0;
-
-        fetchedDivs.forEach(div => {
-            let count = 0;
-            Array.from(div.children).forEach(child => {
-                if (child.querySelector('a[href*="/verkkokauppa/"], a[href*="/sortiment/"]')) count++;
-            });
-            if (count > 0) candidates++;
-
-            if (count > maxChildren) {
-                maxChildren = count;
-                fetchedContainer = div;
-            }
-        });
+        const fetchedContainer = findProductGridInDoc(doc);
+        const maxChildren = fetchedContainer ? fetchedContainer.children.length : 0;
 
         if (fetchedContainer && maxChildren > 0) {
             if (debugElement) debugElement.innerText = `Appending ${maxChildren} items...`;
@@ -809,6 +1493,8 @@ function initAll() {
         findAndInject();
         initHoverCopySystem();
     }
+    // Always attempt to init price sorting if user is standard
+    initPriceSorting();
 }
 
 if (document.readyState === 'loading') {

@@ -247,3 +247,59 @@ body {
 .save-indicator.visible {
     opacity: 1;
 }
+
+/* --- Smart Search --- */
+.search-form {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.text-input {
+    width: 100%;
+    padding: 7px 10px;
+    background: #313244;
+    color: #cdd6f4;
+    border: 1px solid #45475a;
+    border-radius: 6px;
+    font-size: 13px;
+    outline: none;
+    transition: border-color 0.2s;
+}
+
+.text-input:focus {
+    border-color: #89b4fa;
+}
+
+.text-input::placeholder {
+    color: #6c7086;
+}
+
+.input-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+}
+
+.primary-btn {
+    width: 100%;
+    padding: 8px 12px;
+    background: #89b4fa;
+    color: #11111b;
+    border: none;
+    border-radius: 6px;
+    margin-top: 4px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background-color 0.2s, transform 0.1s;
+}
+
+.primary-btn:hover {
+    background: #b4befe;
+}
+
+.primary-btn:active {
+    transform: scale(0.98);
+}

@@ -3,6 +3,7 @@
 const DEFAULTS = {
     infiniteScroll: true,
     copyButtons: true,
+    darkMode: false,
     modifierKey: 'shiftKey',
     countries: {
         fi: { enabled: true, url: 'https://www.lekolar.fi/haku/?query=' },
@@ -17,8 +18,18 @@ const COUNTRY_CODES = ['fi', 'se', 'no', 'dk'];
 // DOM refs
 const infiniteScrollEl = document.getElementById('infiniteScroll');
 const copyButtonsEl = document.getElementById('copyButtons');
+const darkModeEl = document.getElementById('darkMode');
 const modifierKeyEl = document.getElementById('modifierKey');
 const saveIndicator = document.getElementById('saveIndicator');
+
+// Smart Search refs
+const smartQueryEl = document.getElementById('smartQuery');
+const smartLengthEl = document.getElementById('smartLength');
+const smartWidthEl = document.getElementById('smartWidth');
+const smartColorEl = document.getElementById('smartColor');
+const smartSeriesEl = document.getElementById('smartSeries');
+const smartEcolabelEl = document.getElementById('smartEcolabel');
+const smartSearchBtn = document.getElementById('smartSearchBtn');
 
 // Country refs
 const countryRadios = {};
@@ -41,6 +52,7 @@ function loadSettings() {
 
         infiniteScrollEl.checked = settings.infiniteScroll;
         copyButtonsEl.checked = settings.copyButtons;
+        if (darkModeEl) darkModeEl.checked = settings.darkMode;
         modifierKeyEl.value = settings.modifierKey;
 
         // Find which country is enabled and select its radio
@@ -71,6 +83,7 @@ function saveSettings() {
     const settings = {
         infiniteScroll: infiniteScrollEl.checked,
         copyButtons: copyButtonsEl.checked,
+        darkMode: darkModeEl ? darkModeEl.checked : false,
         modifierKey: modifierKeyEl.value,
         countries
     };
@@ -91,6 +104,7 @@ function showSaveIndicator() {
 // Auto-save on change
 infiniteScrollEl.addEventListener('change', saveSettings);
 copyButtonsEl.addEventListener('change', saveSettings);
+if (darkModeEl) darkModeEl.addEventListener('change', saveSettings);
 modifierKeyEl.addEventListener('change', saveSettings);
 
 COUNTRY_CODES.forEach(code => {
@@ -101,6 +115,32 @@ COUNTRY_CODES.forEach(code => {
         clearTimeout(urlTimer);
         urlTimer = setTimeout(saveSettings, 500);
     });
+});
+
+// Smart Search Action
+smartSearchBtn.addEventListener('click', () => {
+    // Determine active country baseUrl
+    let baseUrl = 'https://www.lekolar.fi/haku/';
+    for (const code of COUNTRY_CODES) {
+        if (countryRadios[code].checked) {
+            // Strip the '?query=' part if it exists in the preset url
+            baseUrl = countryUrls[code].value.split('?')[0];
+            break;
+        }
+    }
+
+    const query = smartQueryEl.value.trim();
+    const filters = {
+        length: smartLengthEl.value.trim(),
+        width: smartWidthEl.value.trim(),
+        color: smartColorEl.value.trim(),
+        series: smartSeriesEl.value.trim(),
+        ecolabel: smartEcolabelEl.value.trim()
+    };
+
+    // Use global from searchUtils.js
+    const searchUrl = window.buildLekolarSearchUrl(baseUrl, query, filters);
+    chrome.tabs.create({ url: searchUrl });
 });
 
 // Initialize

@@ -104,4 +104,226 @@ article:hover .lekolar-hover-copy {
     pointer-events: auto;
 }
 
+/* --- Price Sorting --- */
+.lekolar-sort-container {
+    padding: 10px 15px;
+    margin: 10px 0;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 14px;
+    font-weight: 500;
+}
+
+.lekolar-sort-select {
+    padding: 6px 10px;
+    border-radius: 4px;
+    border: 1px solid #cbd5e1;
+    background: #ffffff;
+    font-size: 14px;
+    cursor: pointer;
+}
+
+.lekolar-loading-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: rgba(255, 255, 255, 0.9);
+    z-index: 99999;
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 20px;
+}
+
+.lekolar-spinner {
+    width: 50px;
+    height: 50px;
+    border: 5px solid #e2e8f0;
+    border-top-color: #3b82f6;
+    border-radius: 50%;
+    animation: lekolar-spin 1s linear infinite;
+}
+
+.lekolar-loading-text {
+    font-size: 18px;
+    font-weight: 600;
+    color: #1e293b;
+}
+
+@keyframes lekolar-spin {
+    to { transform: rotate(360deg); }
+}
+
+/* --- Spec Search (checkboxes on dimensions, links on all spec values) --- */
+
+.les-spec-checkbox {
+    width: 16px;
+    height: 16px;
+    accent-color: #dc2626;
+    cursor: pointer;
+    margin-right: 6px;
+    vertical-align: middle;
+    flex-shrink: 0;
+}
+
+.les-spec-link {
+    color: #2563eb;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    cursor: pointer;
+    transition: color 0.15s;
+}
+
+.les-spec-link:hover {
+    color: #1d4ed8;
+    text-decoration-thickness: 2px;
+}
+
+.les-spec-search-container {
+    display: inline-flex;
+    align-items: center;
+    margin-left: 10px;
+}
+
+.les-spec-search-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 10px;
+    height: 28px;
+    background: #f1f5f9;
+    color: #334155;
+    border: 1px solid #cbd5e1;
+    border-radius: 5px;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    vertical-align: middle;
+    transition: all 0.2s ease;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+}
+
+.les-spec-search-btn:hover {
+    background: #e2e8f0;
+    color: #0f172a;
+    border-color: #94a3b8;
+}
+
+.les-spec-search-btn:active {
+    transform: scale(0.97);
+}
+
+.les-spec-search-btn svg {
+    color: #64748b;
+}
+
+.les-spec-search-btn:hover svg {
+    color: #0f172a;
+}
+
+@keyframes les-shake {
+    0%, 100% { transform: translateX(0); }
+    20% { transform: translateX(-3px); }
+    40% { transform: translateX(3px); }
+    60% { transform: translateX(-2px); }
+    80% { transform: translateX(2px); }
+}
+
+.les-spec-search-shake {
+    animation: les-shake 0.4s ease;
+    border-color: #dc2626 !important;
+}
+
+/* Dark/Black theme overrides */
+html.les-theme-dark .les-spec-link,
+html.les-theme-black .les-spec-link {
+    color: #60a5fa;
+}
+
+html.les-theme-dark .les-spec-link:hover,
+html.les-theme-black .les-spec-link:hover {
+    color: #93c5fd;
+}
+
+html.les-theme-dark .les-spec-search-btn,
+html.les-theme-black .les-spec-search-btn {
+    background: #1e293b;
+    color: #e2e8f0;
+    border-color: #334155;
+}
+
+html.les-theme-dark .les-spec-search-btn:hover,
+html.les-theme-black .les-spec-search-btn:hover {
+    background: #334155;
+    color: #f8fafc;
+    border-color: #475569;
+}
+
+html.les-theme-black .les-spec-search-btn {
+    background: #0a0a0a;
+}
+
+/* --- Compliance Lookup Button --- */
+
+.lekolar-compliance-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 8px 16px;
+    margin-top: 12px;
+    width: 100%;
+    background: #f3f4f6; /* light gray */
+    color: #111827;      /* near-black text */
+    border: 1px solid #d1d5db;
+    border-radius: 5px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    text-decoration: none;
+    transition: all 0.2s ease;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.08);
+    box-sizing: border-box;
+}
+
+.lekolar-compliance-btn:hover {
+    background: #e5e7eb; /* slightly darker gray on hover */
+    color: #111827;
+    text-decoration: none;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.12);
+}
+
+.lekolar-compliance-btn:active {
+    transform: scale(0.98);
+}
+
+.lekolar-compliance-btn svg {
+    color: #4b5563; /* gray icon */
+    flex-shrink: 0;
+}
+
+.lekolar-compliance-btn:hover svg {
+    color: #111827;
+}
+
+html.les-theme-dark .lekolar-compliance-btn,
+html.les-theme-black .lekolar-compliance-btn {
+    background: #374151; /* dark gray */
+    color: #e5e7eb;
+    border-color: #4b5563;
+}
+
+html.les-theme-dark .lekolar-compliance-btn:hover,
+html.les-theme-black .lekolar-compliance-btn:hover {
+    background: #4b5563;
+    color: #f9fafb;
+}
+
 /* --- END OF EXTENSION STYLES --- */
