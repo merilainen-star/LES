@@ -1,0 +1,15 @@
+LekolarEnhancer/README.md
+LekolarEnhancer/background.js
+LekolarEnhancer/content.js
+LekolarEnhancer/icons/icon128.png
+LekolarEnhancer/icons/icon16.png
+LekolarEnhancer/icons/icon48.png
+LekolarEnhancer/manifest-chrome.json
+LekolarEnhancer/manifest.json
+LekolarEnhancer/popup.css
+LekolarEnhancer/popup.html
+LekolarEnhancer/popup.js
+LekolarEnhancer/searchUtils.js
+LekolarEnhancer/style.css
+LekolarEnhancer/test.html
+LekolarEnhancer/test_facets.js

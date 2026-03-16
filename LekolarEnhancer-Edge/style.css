@@ -270,6 +270,28 @@ html.les-theme-black .les-spec-search-btn {
     background: #0a0a0a;
 }
 
+/* --- Buttons Bar (Search + SharePoint side by side) --- */
+
+.les-buttons-bar {
+    display: flex;
+    gap: 8px;
+    margin-top: 12px;
+    width: 100%;
+}
+
+.les-buttons-bar .lekolar-compliance-btn {
+    margin-top: 0;
+    flex: 1;
+}
+
+.les-buttons-bar .les-spec-search-btn {
+    height: auto;
+    padding: 8px 16px;
+    font-size: 13px;
+    font-weight: 600;
+    box-sizing: border-box;
+}
+
 /* --- Compliance Lookup Button --- */
 
 .lekolar-compliance-btn {

@@ -54,12 +54,6 @@ function extractBaseItemNumber(rawNumber) {
 }
 
 function getMainProductNumber() {
-    // Prefer structured product data when available.
-    const buyInfo = document.querySelector('.product-page-wrapper .buy-info[data-articlenumber], .product-page .buy-info[data-articlenumber], .js-buyInfo[data-articlenumber]');
-    if (buyInfo && buyInfo.dataset && buyInfo.dataset.articlenumber) {
-        return buyInfo.dataset.articlenumber;
-    }
-
     // Restrict lookup to the main product detail area to avoid related/upsell products.
     const productInfoRoot =
         document.querySelector('.product-info') ||
@@ -67,33 +61,40 @@ function getMainProductNumber() {
         document.querySelector('.product-page-wrapper .product-info') ||
         document.querySelector('.product-page') ||
         document.querySelector('.product-page-wrapper');
-    if (!productInfoRoot) return getProductNumber();
 
-    const numberBtn = productInfoRoot.querySelector('.lekolar-copy-btn[data-type="number"]');
-    if (numberBtn && numberBtn.dataset && numberBtn.dataset.value) {
-        return numberBtn.dataset.value;
+    if (productInfoRoot) {
+        const numberBtn = productInfoRoot.querySelector('.lekolar-copy-btn[data-type="number"]');
+        if (numberBtn && numberBtn.dataset && numberBtn.dataset.value) {
+            return numberBtn.dataset.value;
+        }
+
+        try {
+            const localXPath = ".//*[contains(text(), 'Tuotenro') or contains(text(), 'Art.nr') or contains(text(), 'Varenr')]";
+            const result = document.evaluate(localXPath, productInfoRoot, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
+            for (let i = 0; i < result.snapshotLength; i++) {
+                const element = result.snapshotItem(i);
+                const text = (element.textContent || '').trim();
+                const match = text.match(/(?:Tuotenro|Art\.nr|Varenr)[\.\s:]*\s*([\d-]+)/i);
+                if (match) return match[1];
+
+                let next = element.nextSibling;
+                while (next && (next.nodeType === 8 || (next.nodeType === 3 && !(next.textContent || '').trim()))) {
+                    next = next.nextSibling;
+                }
+                if (next && next.textContent) {
+                    const numberMatch = next.textContent.trim().match(/^:?\s*([\d-]+)/);
+                    if (numberMatch) return numberMatch[1];
+                }
+            }
+        } catch (e) {
+            console.error("LES Error: Failed to find main product number", e);
+        }
     }
 
-    try {
-        const localXPath = ".//*[contains(text(), 'Tuotenro') or contains(text(), 'Art.nr') or contains(text(), 'Varenr')]";
-        const result = document.evaluate(localXPath, productInfoRoot, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
-        for (let i = 0; i < result.snapshotLength; i++) {
-            const element = result.snapshotItem(i);
-            const text = (element.textContent || '').trim();
-            const match = text.match(/(?:Tuotenro|Art\.nr|Varenr)[\.\s:]*\s*([\d-]+)/i);
-            if (match) return match[1];
-
-            let next = element.nextSibling;
-            while (next && (next.nodeType === 8 || (next.nodeType === 3 && !(next.textContent || '').trim()))) {
-                next = next.nextSibling;
-            }
-            if (next && next.textContent) {
-                const numberMatch = next.textContent.trim().match(/^:?\s*([\d-]+)/);
-                if (numberMatch) return numberMatch[1];
-            }
-        }
-    } catch (e) {
-        console.error("LES Error: Failed to find main product number", e);
+    // Fallback to structured product data if the text search fails.
+    const buyInfo = document.querySelector('.product-page-wrapper .buy-info[data-articlenumber], .product-page .buy-info[data-articlenumber], .js-buyInfo[data-articlenumber]');
+    if (buyInfo && buyInfo.dataset && buyInfo.dataset.articlenumber) {
+        return buyInfo.dataset.articlenumber;
     }
 
     return getProductNumber();
@@ -321,7 +322,7 @@ function findAndInject() {
         const mainProductNumber = getMainProductNumber();
         const baseNumber = extractBaseItemNumber(mainProductNumber);
         if (baseNumber) {
-            const complianceUrl = `https://lekolarab.sharepoint.com/sites/Compliance/_layouts/15/search.aspx/siteall?q=${encodeURIComponent(baseNumber)}`;
+            const complianceUrl = `https://lekolarab.sharepoint.com/_layouts/15/search.aspx/?q=${encodeURIComponent(baseNumber)}`;
 
             let btn = document.querySelector('.lekolar-compliance-btn');
             if (!btn) {
@@ -364,7 +365,7 @@ function findAndInject() {
                 svg.appendChild(chk2);
 
                 const label = document.createElement('span');
-                label.textContent = 'Look up in Compliance';
+                label.textContent = 'Search in SharePoint';
 
                 btn.appendChild(svg);
                 btn.appendChild(label);
@@ -372,7 +373,7 @@ function findAndInject() {
 
             // Always refresh URL/title in case of SPA navigation between product pages.
             btn.href = complianceUrl;
-            btn.title = `Look up ${baseNumber} in Compliance`;
+            btn.title = `Search ${baseNumber} in SharePoint`;
 
             // Keep placement at bottom of the Tuotetiedot / product-properties sidebar.
             const sidebar = document.querySelector('.product-properties, .product-attributes, .product-details-sidebar, .product-specs');
@@ -505,45 +506,42 @@ function injectSpecSearch() {
     if (matchedRows.length === 0) return;
 
     const baseUrl = getSpecSearchBaseUrl();
-    const dimensionRows = matchedRows.filter(r => r.spec.type === 'dimension');
+    const facetMap = window.PIM_TO_FACET_MAP || {};
+    const dimensionRows = matchedRows.filter(r => r.spec.type === 'dimension' && !(r.spec.filterKey in facetMap && facetMap[r.spec.filterKey] === null));
 
     matchedRows.forEach(({ row, th, valEl, searchValue, spec }) => {
+        if (spec.filterKey in facetMap && facetMap[spec.filterKey] === null) return;
+
+        const hasBuildUrl = typeof window.buildLekolarSearchUrl === 'function';
+        const fullText = valEl.innerText.trim();
+
         if (spec.type === 'dimension') {
+            if (hasBuildUrl) {
+                const numericPart = fullText.match(/(\d+(?:[.,]\d+)?)\s*(cm|mm|m)?/);
+                if (numericPart) {
+                    const link = document.createElement('a');
+                    link.className = 'les-spec-link';
+                    link.href = window.buildLekolarSearchUrl(baseUrl, '', { [spec.filterKey]: searchValue });
+                    link.target = '_blank';
+                    link.rel = 'noopener noreferrer';
+                    link.title = `Search: ${th.innerText.replace(':', '').trim()} ${numericPart[0]}`;
+                    link.textContent = numericPart[0];
+
+                    const rest = fullText.substring(numericPart.index + numericPart[0].length);
+                    valEl.textContent = fullText.substring(0, numericPart.index);
+                    valEl.appendChild(link);
+                    if (rest) valEl.appendChild(document.createTextNode(rest));
+                }
+            }
+
             const checkbox = document.createElement('input');
             checkbox.type = 'checkbox';
             checkbox.className = 'les-spec-checkbox';
             checkbox.dataset.filterKey = spec.filterKey;
             checkbox.dataset.searchValue = searchValue;
             checkbox.title = 'Include in dimension search';
-
-            if (th.parentElement === row) {
-                th.insertBefore(checkbox, th.firstChild);
-            } else if (th.parentElement) {
-                th.parentElement.insertBefore(checkbox, th);
-            }
-        }
-
-        if (typeof window.buildLekolarSearchUrl !== 'function') return;
-
-        const fullText = valEl.innerText.trim();
-
-        if (spec.type === 'dimension') {
-            const numericPart = fullText.match(/(\d+(?:[.,]\d+)?)\s*(cm|mm|m)?/);
-            if (!numericPart) return;
-
-            const link = document.createElement('a');
-            link.className = 'les-spec-link';
-            link.href = window.buildLekolarSearchUrl(baseUrl, '', { [spec.filterKey]: searchValue });
-            link.target = '_blank';
-            link.rel = 'noopener noreferrer';
-            link.title = `Search: ${th.innerText.replace(':', '').trim()} ${numericPart[0]}`;
-            link.textContent = numericPart[0];
-
-            const rest = fullText.substring(numericPart.index + numericPart[0].length);
-            valEl.textContent = fullText.substring(0, numericPart.index);
-            valEl.appendChild(link);
-            if (rest) valEl.appendChild(document.createTextNode(rest));
-        } else {
+            valEl.insertBefore(checkbox, valEl.firstChild);
+        } else if (hasBuildUrl) {
             const bubble = valEl.querySelector && valEl.querySelector('.color-bubble');
             if (bubble && bubble.title) {
                 const link = document.createElement('a');
@@ -570,10 +568,6 @@ function injectSpecSearch() {
     });
 
     if (dimensionRows.length > 0) {
-        const lastDimRow = dimensionRows[dimensionRows.length - 1];
-        const container = document.createElement('span');
-        container.className = 'les-spec-search-container';
-
         const btn = document.createElement('button');
         btn.className = 'les-spec-search-btn';
         btn.title = 'Search by selected dimensions';
@@ -629,8 +623,22 @@ function injectSpecSearch() {
             }
         });
 
-        container.appendChild(btn);
-        lastDimRow.valEl.appendChild(container);
+        let buttonsBar = document.querySelector('.les-buttons-bar');
+        if (!buttonsBar) {
+            buttonsBar = document.createElement('div');
+            buttonsBar.className = 'les-buttons-bar';
+            const complianceBtn = document.querySelector('.lekolar-compliance-btn');
+            if (complianceBtn) {
+                complianceBtn.parentElement.insertBefore(buttonsBar, complianceBtn);
+                buttonsBar.appendChild(complianceBtn);
+            } else {
+                const sidebar = document.querySelector('.product-properties, .product-attributes, .product-details-sidebar, .product-specs');
+                if (sidebar) {
+                    sidebar.appendChild(buttonsBar);
+                }
+            }
+        }
+        buttonsBar.insertBefore(btn, buttonsBar.firstChild);
     }
 }
 

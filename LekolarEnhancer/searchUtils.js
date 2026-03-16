@@ -72,4 +72,5 @@ if (typeof module !== 'undefined' && module.exports) {
     module.exports = { buildLekolarSearchUrl, PIM_TO_FACET_MAP };
 } else {
     window.buildLekolarSearchUrl = buildLekolarSearchUrl;
+    window.PIM_TO_FACET_MAP = PIM_TO_FACET_MAP;
 }
