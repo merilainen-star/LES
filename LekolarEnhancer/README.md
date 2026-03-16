@@ -60,5 +60,5 @@ The extension injects utility buttons directly into the product page DOM to faci
 
 ## Installation
 
-- Load as a temporary addon in `v` (Firefox) or Unpacked Extension in Chrome/Edge.
+- Load as a temporary addon in `about:debugging` (Firefox) or Unpacked Extension in Chrome/Edge.
 - Requires no configuration; works automatically on matching domains.
