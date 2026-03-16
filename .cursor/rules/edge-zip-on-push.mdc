@@ -1,0 +1,26 @@
+---
+description: Build updated Edge extension zip before every git push
+alwaysApply: true
+---
+
+# Update Edge Extension Zip Before Push
+
+Whenever you are about to run `git push`, you **must** first rebuild the Edge extension zip file so the local zip always reflects the latest code.
+
+## Steps Before Pushing
+
+1. Create/overwrite `LekolarEnhancer-Edge.zip` in the repo root by zipping the entire `LekolarEnhancer-Edge/` folder contents (not the folder itself — the zip root should contain `manifest.json`, not `LekolarEnhancer-Edge/manifest.json`).
+2. Use PowerShell's `Compress-Archive` with `-Force` to overwrite any existing zip:
+
+```powershell
+Compress-Archive -Path "LekolarEnhancer-Edge\*" -DestinationPath "LekolarEnhancer-Edge.zip" -Force
+```
+
+3. The zip is listed in `.gitignore` (`*.zip`), so it will **not** be committed — this is intentional. The zip is for local sideloading only.
+4. After creating the zip, proceed with the `git push` as requested.
+
+## Important
+
+- Always rebuild the zip even if you are unsure whether Edge files changed — it is cheap and guarantees consistency.
+- Do **not** add the zip to git staging or try to commit it.
+- Do **not** skip this step or ask the user whether to do it — just do it automatically every time before pushing.
