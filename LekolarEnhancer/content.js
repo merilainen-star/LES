@@ -207,12 +207,20 @@ function createCopyButton(textGetter, type) {
                 const plainText = `${number} ${name} - ${url}`;
                 const htmlText = `<a href="${url}">${number} ${name}</a>`;
 
-                const clipboardItem = new ClipboardItem({
-                    "text/plain": new Blob([plainText], { type: "text/plain" }),
-                    "text/html": new Blob([htmlText], { type: "text/html" })
-                });
+                try {
+                    const clipboardItem = new ClipboardItem({
+                        "text/plain": new Blob([plainText], { type: "text/plain" }),
+                        "text/html": new Blob([htmlText], { type: "text/html" })
+                    });
 
-                navigator.clipboard.write([clipboardItem]).then(onCopySuccess).catch(err => console.error('Failed to copy rich text: ', err));
+                    navigator.clipboard.write([clipboardItem]).then(onCopySuccess).catch(err => {
+                        console.warn('LES: Failed to copy rich text:', err);
+                        navigator.clipboard.writeText(plainText).then(onCopySuccess);
+                    });
+                } catch (e) {
+                    // Fallback for browsers (like some Firefox setups) that don't support ClipboardItem natively
+                    navigator.clipboard.writeText(plainText).then(onCopySuccess);
+                }
                 return;
             }
         }
@@ -242,68 +250,70 @@ function findAndInject() {
     if (!document.body) return; // Wait for body
 
     // 1. Inject Product Number Buttons
-    // Find all potential product number containers
-    const xpath = "//*[contains(text(), 'Tuotenro') or contains(text(), 'Art.nr') or contains(text(), 'Varenr')]";
-    try {
-        const result = document.evaluate(xpath, document, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
-        for (let i = 0; i < result.snapshotLength; i++) {
-            const element = result.snapshotItem(i);
-            const text = element.textContent.trim();
-            let number = null;
-            let target = null;
-            let method = 'append';
+    // On list/search pages the DOM contains unreliable article numbers
+    // (e.g. series IDs instead of real product numbers), so skip XPath
+    // injection there — the hover/prefetch system handles those correctly.
+    if (!isListPage()) {
+        const xpath = "//*[contains(text(), 'Tuotenro') or contains(text(), 'Art.nr') or contains(text(), 'Varenr')]";
+        try {
+            const result = document.evaluate(xpath, document, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
+            for (let i = 0; i < result.snapshotLength; i++) {
+                const element = result.snapshotItem(i);
+                const text = element.textContent.trim();
+                let number = null;
+                let target = null;
+                let method = 'append';
 
-            let match = text.match(/(?:Tuotenro|Art\.nr|Varenr)[\.\s:]*\s*([\d-]+)/i);
-            if (match) {
-                number = match[1];
-                target = element;
-            } else if (text.match(/Tuotenro|Art\.nr|Varenr/i)) {
-                let next = element.nextSibling;
-                while (next && (next.nodeType === 8 || (next.nodeType === 3 && !next.textContent.trim()))) {
-                    next = next.nextSibling;
-                }
-                if (next && next.textContent) {
-                    const nextText = next.textContent.trim();
-                    const numberMatch = nextText.match(/^:?\s*([\d-]+)/);
-                    if (numberMatch) {
-                        number = numberMatch[1];
-                        if (next.nodeType === 1) target = next;
-                        else {
-                            target = next.parentNode;
-                            if (next.nextSibling) {
-                                target = next.nextSibling;
-                                method = 'insertBefore';
-                            } else {
+                let match = text.match(/(?:Tuotenro|Art\.nr|Varenr)[\.\s:]*\s*([\d-]+)/i);
+                if (match) {
+                    number = match[1];
+                    target = element;
+                } else if (text.match(/Tuotenro|Art\.nr|Varenr/i)) {
+                    let next = element.nextSibling;
+                    while (next && (next.nodeType === 8 || (next.nodeType === 3 && !next.textContent.trim()))) {
+                        next = next.nextSibling;
+                    }
+                    if (next && next.textContent) {
+                        const nextText = next.textContent.trim();
+                        const numberMatch = nextText.match(/^:?\s*([\d-]+)/);
+                        if (numberMatch) {
+                            number = numberMatch[1];
+                            if (next.nodeType === 1) target = next;
+                            else {
                                 target = next.parentNode;
+                                if (next.nextSibling) {
+                                    target = next.nextSibling;
+                                    method = 'insertBefore';
+                                } else {
+                                    target = next.parentNode;
+                                }
                             }
                         }
                     }
                 }
-            }
 
-            if (number && target) {
-                // Check if button already exists for this target
-                let alreadyExists = false;
-                if (method === 'append') {
-                    if (target.querySelector(`.lekolar-copy-btn[data-value="${number}"]`)) alreadyExists = true;
-                } else if (method === 'insertBefore') {
-                    if (target.previousElementSibling &&
-                        target.previousElementSibling.classList.contains('lekolar-copy-btn') &&
-                        target.previousElementSibling.dataset.value === number) {
-                        alreadyExists = true;
+                if (number && target) {
+                    let alreadyExists = false;
+                    if (method === 'append') {
+                        if (target.querySelector(`.lekolar-copy-btn[data-value="${number}"]`)) alreadyExists = true;
+                    } else if (method === 'insertBefore') {
+                        if (target.previousElementSibling &&
+                            target.previousElementSibling.classList.contains('lekolar-copy-btn') &&
+                            target.previousElementSibling.dataset.value === number) {
+                            alreadyExists = true;
+                        }
+                    }
+
+                    if (!alreadyExists) {
+                        const btn = createCopyButton(number, 'number');
+                        if (method === 'insertBefore') target.parentNode.insertBefore(btn, target);
+                        else target.appendChild(btn);
                     }
                 }
-
-                if (!alreadyExists) {
-                    const btn = createCopyButton(number, 'number');
-                    if (isListPage()) btn.classList.add('lekolar-hover-copy');
-                    if (method === 'insertBefore') target.parentNode.insertBefore(btn, target);
-                    else target.appendChild(btn);
-                }
             }
+        } catch (e) {
+            console.error("LES Error: Failed during findAndInject", e);
         }
-    } catch (e) {
-        console.error("LES Error: Failed during findAndInject", e);
     }
 
     // 2. Inject Product Name Button
@@ -1206,23 +1216,56 @@ async function processFetchQueue() {
 function extractProductNumberFromDoc(doc) {
     let productNumber = null;
 
-    // 1. Check data attributes on main elements
-    const buyInfo = doc.querySelector('.buy-info, .js-buyInfo');
-    if (buyInfo && buyInfo.dataset.articlenumber) {
-        productNumber = buyInfo.dataset.articlenumber;
+    // Constrain the search to the main product area if possible
+    const productInfoRoot =
+        doc.querySelector('.product-info') ||
+        doc.querySelector('.product-page .product-info') ||
+        doc.querySelector('.product-page-wrapper .product-info') ||
+        doc.querySelector('.product-page') ||
+        doc.querySelector('.product-page-wrapper') ||
+        doc;
+
+    // 1. Check "Tuotenro" text first (shows the true selected/default variant number instead of a generic series ID)
+    try {
+        const xpath = ".//*[contains(text(), 'Tuotenro') or contains(text(), 'Art.nr') or contains(text(), 'Varenr')]";
+        // doc.evaluate context node must be an element, so we can't use HTMLDocument directly with a relative xpath if we aren't careful
+        // but passing the root element works better. If productInfoRoot is 'doc', the relative xpath './/' might fail on Document node.
+        const contextNode = productInfoRoot === doc ? doc.documentElement || doc : productInfoRoot;
+        const result = doc.evaluate(xpath, contextNode, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
+        for (let i = 0; i < result.snapshotLength; i++) {
+            const element = result.snapshotItem(i);
+            const text = (element.textContent || '').trim();
+            const match = text.match(/(?:Tuotenro|Art\.nr|Varenr)[\.\s:]*\s*([\d-]+)/i);
+            if (match) {
+                productNumber = match[1];
+                break;
+            }
+
+            let next = element.nextSibling;
+            while (next && (next.nodeType === 8 || (next.nodeType === 3 && !(next.textContent || '').trim()))) {
+                next = next.nextSibling;
+            }
+            if (next && next.textContent) {
+                const numberMatch = next.textContent.trim().match(/^:?\s*([\d-]+)/);
+                if (numberMatch) {
+                    productNumber = numberMatch[1];
+                    break;
+                }
+            }
+        }
+    } catch (e) {
+        console.error("LES Error: Failed to extract product number from doc text", e);
     }
 
-    // 2. Check "Tuotenro" text
+    // 2. Fallback to data attributes on main elements
     if (!productNumber) {
-        const xpath = "//*[contains(text(), 'Tuotenro') or contains(text(), 'Art.nr') or contains(text(), 'Varenr')]";
-        const result = doc.evaluate(xpath, doc, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
-        if (result.singleNodeValue) {
-            const match = result.singleNodeValue.textContent.match(/(?:Tuotenro|Art\.nr|Varenr)[\.\s:]*\s*([\d-]+)/i);
-            if (match) productNumber = match[1];
+        const buyInfo = doc.querySelector('.buy-info, .js-buyInfo');
+        if (buyInfo && buyInfo.dataset.articlenumber) {
+            productNumber = buyInfo.dataset.articlenumber;
         }
     }
 
-    // 3. Check meta tags or other data attributes
+    // 3. Fallback to meta tags or other data attributes
     if (!productNumber) {
         const productDiv = doc.querySelector('[data-productnumber]');
         if (productDiv) productNumber = productDiv.dataset.productnumber;
@@ -1310,7 +1353,7 @@ function injectCopyButtonOnCard(card, number) {
     let target = card.querySelector('.product-artno, .eS-product-artno, [class*="artno"]');
 
     if (target) {
-        target.innerText = `Tuotenro: ${number} `;
+        target.textContent = `Tuotenro: ${number} `;
         target.appendChild(btn);
     } else {
         target = card.querySelector('.product-title, .inner-title, h3, .product-name, [class*="title"], .eS-productname');
@@ -1410,9 +1453,7 @@ function scheduleIdlePrefetch() {
             if (deadline.timeRemaining() > 5 || deadline.didTimeout) {
                 prefetchQueued.add(url);
                 fetchProductNumber(url).then(number => {
-                    // Data is now cached — button shows instantly on next hover
-                    // If user already hovered this card, inject button now
-                    if (number && hoverInitialized.has(card)) {
+                    if (number) {
                         injectCopyButtonOnCard(card, number);
                     }
                 });
