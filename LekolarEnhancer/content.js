@@ -717,9 +717,9 @@ function findProductGridInDoc(doc) {
     return null;
 }
 
-// --- Price Sorting for Sales Reps ---
-
 let isPriceSortActive = false;
+
+// @FIREFOX_ONLY_START
 let originalGridContent = null;
 let allSortedCards = [];
 
@@ -925,6 +925,7 @@ function initPriceSorting() {
         await performPriceSort(value, gridContainer);
     });
 }
+// @FIREFOX_ONLY_END
 
 function initSearchConsolidation() {
     // Run on search pages AND category pages
@@ -1542,8 +1543,9 @@ function initAll() {
         findAndInject();
         initHoverCopySystem();
     }
-    // Always attempt to init price sorting if user is standard
+    // @FIREFOX_ONLY_START
     initPriceSorting();
+    // @FIREFOX_ONLY_END
 }
 
 if (document.readyState === 'loading') {
