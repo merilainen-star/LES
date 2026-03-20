@@ -17,6 +17,9 @@ const DEFAULT_SETTINGS = {
     }
 };
 
+const DEFAULT_SHAREPOINT_PROBE_URL = 'https://lekolarab.sharepoint.com/_api/web/currentuser?$select=Id,Title';
+const SHAREPOINT_REQUEST_TIMEOUT_MS = 12000;
+
 // Set defaults on install
 chrome.runtime.onInstalled.addListener(() => {
     chrome.storage.sync.get(null, (existing) => {
@@ -160,4 +163,116 @@ chrome.omnibox.onInputChanged.addListener((text, suggest) => {
         
         suggest(suggestions);
     });
+});
+
+function classifySharePointResponse(response, bodyText) {
+    const finalUrl = (response.url || '').toLowerCase();
+    const text = (bodyText || '').toLowerCase();
+    const isOnTargetTenant = finalUrl.includes('lekolarab.sharepoint.com');
+
+    if (response.type === 'opaqueredirect') {
+        return { status: 'login_required', entitled: false };
+    }
+
+    if (response.status === 401 || response.status === 407) {
+        return { status: 'login_required', entitled: false };
+    }
+
+    if (response.status === 403) {
+        return { status: 'no_access', entitled: false };
+    }
+
+    if ([301, 302, 303, 307, 308].includes(response.status)) {
+        return { status: 'login_required', entitled: false };
+    }
+
+    const deniedIndicators = [
+        'access denied',
+        'you do not have permission',
+        'du har inte behörighet',
+        'sinulla ei ole käyttöoikeutta',
+        'ei käyttöoikeutta',
+        'ingen åtkomst',
+        'ingen adgang'
+    ];
+    if (deniedIndicators.some(token => text.includes(token))) {
+        return { status: 'no_access', entitled: false };
+    }
+
+    const loginIndicators = [
+        'login.microsoftonline.com',
+        '/_layouts/15/authenticate.aspx',
+        '/_forms/default.aspx?wa=wsignin1.0',
+        'sign in to your account',
+        'logga in på ditt konto',
+        'kirjaudu tilillesi',
+        'logg på kontoen din'
+    ];
+    if (!isOnTargetTenant || loginIndicators.some(token => finalUrl.includes(token) || text.includes(token))) {
+        return { status: 'login_required', entitled: false };
+    }
+
+    if (response.ok) {
+        return { status: 'entitled', entitled: true };
+    }
+
+    return { status: 'error', entitled: false };
+}
+
+async function probeSharePointEntitlement(probeUrl) {
+    const targetUrl = probeUrl || DEFAULT_SHAREPOINT_PROBE_URL;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), SHAREPOINT_REQUEST_TIMEOUT_MS);
+
+    try {
+        const response = await fetch(targetUrl, {
+            method: 'GET',
+            credentials: 'include',
+            cache: 'no-store',
+            redirect: 'follow',
+            signal: controller.signal
+        });
+
+        const body = await response.text();
+        const bodySnippet = body.slice(0, 12000);
+        const classified = classifySharePointResponse(response, bodySnippet);
+
+        return {
+            ...classified,
+            checkedUrl: targetUrl,
+            finalUrl: response.url || targetUrl,
+            httpStatus: response.status,
+            checkedAt: Date.now()
+        };
+    } catch (error) {
+        const timedOut = error && error.name === 'AbortError';
+        return {
+            status: 'error',
+            entitled: false,
+            checkedUrl: targetUrl,
+            error: timedOut ? 'timeout' : (error && error.message) ? error.message : String(error),
+            checkedAt: Date.now()
+        };
+    } finally {
+        clearTimeout(timeoutId);
+    }
+}
+
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (!message || message.action !== 'probeSharePointEntitlement') {
+        return;
+    }
+
+    probeSharePointEntitlement(message.probeUrl)
+        .then(sendResponse)
+        .catch((error) => {
+            sendResponse({
+                status: 'error',
+                entitled: false,
+                error: (error && error.message) ? error.message : String(error),
+                checkedAt: Date.now()
+            });
+        });
+
+    return true;
 });

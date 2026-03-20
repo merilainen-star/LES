@@ -4,6 +4,164 @@ let currentSettings = {
     copyButtons: true,
     modifierKey: 'shiftKey'
 };
+console.info('LES content script loaded');
+
+const SHAREPOINT_PROBE_URL = 'https://lekolarab.sharepoint.com/_api/web/currentuser?$select=Id,Title';
+const ENTITLEMENT_CACHE_KEY = 'lesSharePointEntitlement';
+const ENTITLEMENT_CACHE_TTL_MS = 3 * 60 * 60 * 1000;
+
+let restrictedFeatureAccess = {
+    status: 'unknown',
+    entitled: false,
+    checkedAt: 0,
+    error: null
+};
+let entitlementCheckInFlight = null;
+
+function storageSyncGet(defaults) {
+    return new Promise((resolve) => chrome.storage.sync.get(defaults, resolve));
+}
+
+function storageLocalGet(key) {
+    return new Promise((resolve) => chrome.storage.local.get(key, resolve));
+}
+
+function storageLocalSet(items) {
+    return new Promise((resolve) => chrome.storage.local.set(items, resolve));
+}
+
+function storageLocalRemove(key) {
+    return new Promise((resolve) => chrome.storage.local.remove(key, resolve));
+}
+
+function canUseRestrictedFeatures() {
+    return restrictedFeatureAccess.entitled === true;
+}
+
+function getEntitlementCacheTtlMs(status) {
+    if (status === 'entitled') return ENTITLEMENT_CACHE_TTL_MS;
+    if (status === 'login_required' || status === 'no_access') return 30 * 60 * 1000;
+    // Do not cache transient errors.
+    return 0;
+}
+
+function cleanupRestrictedUi() {
+    const sortContainer = document.querySelector('.lekolar-sort-container');
+    if (sortContainer) sortContainer.remove();
+
+    const sortOverlay = document.getElementById('lekolar-sort-overlay');
+    if (sortOverlay) sortOverlay.remove();
+
+    const complianceBtn = document.querySelector('.lekolar-compliance-btn');
+    if (complianceBtn) complianceBtn.remove();
+
+    const specSearchBtn = document.querySelector('.les-spec-search-btn');
+    if (specSearchBtn) specSearchBtn.remove();
+
+    const buttonsBar = document.querySelector('.les-buttons-bar');
+    if (buttonsBar && buttonsBar.children.length === 0) {
+        buttonsBar.remove();
+    }
+}
+
+async function requestSharePointEntitlement() {
+    return new Promise((resolve) => {
+        let done = false;
+        const finish = (result) => {
+            if (done) return;
+            done = true;
+            clearTimeout(timeoutId);
+            resolve(result);
+        };
+
+        const timeoutId = setTimeout(() => {
+            finish({
+                status: 'error',
+                entitled: false,
+                error: 'probe_timeout',
+                checkedAt: Date.now()
+            });
+        }, 3000);
+
+        try {
+            chrome.runtime.sendMessage(
+                { action: 'probeSharePointEntitlement', probeUrl: SHAREPOINT_PROBE_URL },
+                (response) => {
+                    if (chrome.runtime.lastError) {
+                        finish({
+                            status: 'error',
+                            entitled: false,
+                            error: chrome.runtime.lastError.message,
+                            checkedAt: Date.now()
+                        });
+                        return;
+                    }
+
+                    if (!response || typeof response.entitled !== 'boolean') {
+                        finish({
+                            status: 'error',
+                            entitled: false,
+                            error: 'invalid_probe_response',
+                            checkedAt: Date.now()
+                        });
+                        return;
+                    }
+
+                    finish(response);
+                }
+            );
+        } catch (error) {
+            finish({
+                status: 'error',
+                entitled: false,
+                error: (error && error.message) ? error.message : String(error),
+                checkedAt: Date.now()
+            });
+        }
+    });
+}
+
+async function resolveRestrictedFeatureAccess(forceRefresh = false) {
+    if (!forceRefresh && entitlementCheckInFlight) {
+        return entitlementCheckInFlight;
+    }
+
+    entitlementCheckInFlight = (async () => {
+        const now = Date.now();
+
+        if (!forceRefresh) {
+            const cacheData = await storageLocalGet(ENTITLEMENT_CACHE_KEY);
+            const cached = cacheData[ENTITLEMENT_CACHE_KEY];
+            const cacheTtlMs = cached ? getEntitlementCacheTtlMs(cached.status) : 0;
+            if (cached && cacheTtlMs > 0 && typeof cached.checkedAt === 'number' && (now - cached.checkedAt) < cacheTtlMs) {
+                restrictedFeatureAccess = cached;
+                return restrictedFeatureAccess;
+            }
+        }
+
+        const probe = await requestSharePointEntitlement();
+        restrictedFeatureAccess = {
+            status: probe.status || 'error',
+            entitled: probe.entitled === true,
+            checkedAt: probe.checkedAt || now,
+            error: probe.error || null
+        };
+
+        const ttlMs = getEntitlementCacheTtlMs(restrictedFeatureAccess.status);
+        if (ttlMs > 0) {
+            await storageLocalSet({ [ENTITLEMENT_CACHE_KEY]: restrictedFeatureAccess });
+        } else {
+            await storageLocalRemove(ENTITLEMENT_CACHE_KEY);
+        }
+        return restrictedFeatureAccess;
+    })();
+
+    try {
+        return await entitlementCheckInFlight;
+    } finally {
+        entitlementCheckInFlight = null;
+    }
+}
 
 function getProductNumber() {
     const existingBtn = document.querySelector('.lekolar-copy-btn[data-type="number"]');
@@ -106,12 +264,13 @@ function getProductName() {
     return h1 ? h1.innerText.trim() : null;
 }
 
-function createCopyButton(textGetter, type) {
+function createCopyButton(textGetter, type, options = {}) {
     const button = document.createElement('button');
     button.className = 'lekolar-copy-btn';
     button.dataset.type = type;
 
     let getValue = () => typeof textGetter === 'function' ? textGetter() : textGetter;
+    const getCopyContext = options.getCopyContext || null;
     const initialValue = getValue();
     if (initialValue) button.dataset.value = initialValue;
 
@@ -199,9 +358,10 @@ function createCopyButton(textGetter, type) {
         let textToCopy = getValue();
 
         if (e[currentSettings.modifierKey]) {
-            const name = getProductName();
-            const number = (type === 'number' && textToCopy) ? textToCopy : getProductNumber();
-            const url = window.location.href;
+            const context = typeof getCopyContext === 'function' ? (getCopyContext() || {}) : {};
+            const name = context.name || getProductName();
+            const number = context.number || ((type === 'number' && textToCopy) ? textToCopy : getProductNumber());
+            const url = context.url || window.location.href;
 
             if (name && number) {
                 const plainText = `${number} ${name} - ${url}`;
@@ -327,8 +487,10 @@ function findAndInject() {
         }
     }
 
+    const restrictedEnabled = canUseRestrictedFeatures();
+
     // 3. Inject Compliance Lookup Button (product pages only)
-    if (!isListPage()) {
+    if (restrictedEnabled && !isListPage()) {
         const mainProductNumber = getMainProductNumber();
         const baseNumber = extractBaseItemNumber(mainProductNumber);
         if (baseNumber) {
@@ -405,7 +567,12 @@ function findAndInject() {
     }
 
     // 4. Inject Spec Search (checkboxes + links on spec rows)
-    injectSpecSearch();
+    if (restrictedEnabled) {
+        injectSpecSearch();
+    } else {
+        const staleSpecBtn = document.querySelector('.les-spec-search-btn');
+        if (staleSpecBtn) staleSpecBtn.remove();
+    }
 }
 
 // --- Spec Search: make product attributes into searchable links ---
@@ -869,6 +1036,8 @@ async function performPriceSort(order, gridContainer) {
 }
 
 function initPriceSorting() {
+    if (!canUseRestrictedFeatures()) return;
+
     const isSearch = (window.location.pathname.includes('/haku/') || window.location.pathname.includes('/sok/') || window.location.pathname.includes('/sog/')) && window.location.search.includes('query=');
     const isCategory = window.location.pathname.includes('/verkkokauppa/') || window.location.pathname.includes('/sortiment/');
     if (!isSearch && !isCategory) return;
@@ -1345,10 +1514,38 @@ function getProductCardUrl(card) {
     return link ? link.href : null;
 }
 
+function getProductCardName(card) {
+    if (!card) return null;
+
+    const candidates = [
+        '.product-title',
+        '.inner-title',
+        'h3',
+        '.product-name',
+        '.eS-productname',
+        'a[href*="/verkkokauppa/"]',
+        'a[href*="/sortiment/"]'
+    ];
+
+    for (const selector of candidates) {
+        const element = card.querySelector(selector);
+        const text = element ? (element.textContent || '').trim() : '';
+        if (text) return text;
+    }
+
+    return null;
+}
+
 function injectCopyButtonOnCard(card, number) {
     if (card.querySelector('.lekolar-copy-btn[data-type="number"]')) return;
 
-    const btn = createCopyButton(number, 'number');
+    const btn = createCopyButton(number, 'number', {
+        getCopyContext: () => ({
+            number,
+            name: getProductCardName(card),
+            url: getProductCardUrl(card)
+        })
+    });
     btn.classList.add('lekolar-hover-copy');
 
     let target = card.querySelector('.product-artno, .eS-product-artno, [class*="artno"]');
@@ -1522,19 +1719,44 @@ function compactSearchPage() {
 
 
 // Settings
-function loadSettingsAndInit() {
-    chrome.storage.sync.get({
-        infiniteScroll: true,
-        copyButtons: true,
-        modifierKey: 'shiftKey'
-    }, (items) => {
+async function loadSettingsAndInit() {
+    try {
+        const items = await storageSyncGet({
+            infiniteScroll: true,
+            copyButtons: true,
+            modifierKey: 'shiftKey'
+        });
         currentSettings = items;
-        initAll();
-    });
+    } catch (error) {
+        console.error('LES Error: Failed to read settings', error);
+    }
+
+    // Initialize non-restricted features immediately while entitlement probe runs.
+    initAll();
+
+    try {
+        await resolveRestrictedFeatureAccess(false);
+        console.info('LES entitlement status:', restrictedFeatureAccess);
+    } catch (error) {
+        // Fail closed for restricted features if probe resolution throws.
+        restrictedFeatureAccess = {
+            status: 'error',
+            entitled: false,
+            checkedAt: Date.now(),
+            error: (error && error.message) ? error.message : String(error)
+        };
+        console.warn('LES: SharePoint entitlement check failed, restricted features disabled', error);
+    }
+
+    initAll();
 }
 
 // Initialize
 function initAll() {
+    if (!canUseRestrictedFeatures()) {
+        cleanupRestrictedUi();
+    }
+
     compactSearchPage();
     if (currentSettings.infiniteScroll) {
         initSearchConsolidation();
@@ -1544,7 +1766,9 @@ function initAll() {
         initHoverCopySystem();
     }
     // @FIREFOX_ONLY_START
-    initPriceSorting();
+    if (canUseRestrictedFeatures()) {
+        initPriceSorting();
+    }
     // @FIREFOX_ONLY_END
 }
 
@@ -1553,20 +1777,15 @@ if (document.readyState === 'loading') {
 } else {
     loadSettingsAndInit();
 }
+window.addEventListener('load', () => {
+    // One late pass catches UI rendered after full page hydration.
+    setTimeout(initAll, 300);
+}, { once: true });
 
 // Watch for settings changes
 chrome.storage.onChanged.addListener((changes, area) => {
     if (area === 'sync') {
-        if (changes.infiniteScroll) currentSettings.infiniteScroll = changes.infiniteScroll.newValue;
-        if (changes.copyButtons) currentSettings.copyButtons = changes.copyButtons.newValue;
-        if (changes.modifierKey) currentSettings.modifierKey = changes.modifierKey.newValue;
-
-        // React to changes
-        if (currentSettings.infiniteScroll) initSearchConsolidation();
-        if (currentSettings.copyButtons) {
-            findAndInject();
-            observeNewProductCards();
-        }
+        loadSettingsAndInit();
     }
 });
 
@@ -1595,4 +1814,35 @@ const pageObserver = new MutationObserver((mutations) => {
     }
 });
 
-pageObserver.observe(document.body, { childList: true, subtree: true });
+let pageObserverStarted = false;
+function startPageObserverWhenReady() {
+    if (pageObserverStarted) return;
+    if (!document.body) {
+        setTimeout(startPageObserverWhenReady, 100);
+        return;
+    }
+    pageObserverStarted = true;
+    pageObserver.observe(document.body, { childList: true, subtree: true });
+}
+
+startPageObserverWhenReady();
+
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (!message || message.action !== 'lesRefreshEntitlement') return;
+
+    (async () => {
+        try {
+            await resolveRestrictedFeatureAccess(message.forceRefresh === true);
+            initAll();
+            sendResponse({ ok: true, status: restrictedFeatureAccess.status });
+        } catch (error) {
+            sendResponse({
+                ok: false,
+                status: 'error',
+                error: (error && error.message) ? error.message : String(error)
+            });
+        }
+    })();
+
+    return true;
+});

@@ -13,7 +13,8 @@
     "*://*.lekolar.fi/*",
     "*://*.lekolar.se/*",
     "*://*.lekolar.no/*",
-    "*://*.lekolar.dk/*"
+    "*://*.lekolar.dk/*",
+    "https://lekolarab.sharepoint.com/*"
   ],
   "action": {
     "default_popup": "popup.html",

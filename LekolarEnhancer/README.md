@@ -1,8 +1,8 @@
-# Lekolar Enhancer - Firefox Addon
+# Lekolar Enhancer - Firefox Extension
 
 ## Project Overview
 
-This project is a Firefox (Manifest V3) extension designed to enhance the productivity of users on the Lekolar e-commerce website (lekolar.fi, lekolar.se, lekolar.dk, lekolar.no).
+This project is the Firefox (Manifest V3) variant of Lekolar Enhancer, designed to improve productivity on the Lekolar e-commerce sites (lekolar.fi, lekolar.se, lekolar.dk, lekolar.no).
 
 ## Core Functionality
 
@@ -62,3 +62,10 @@ The extension injects utility buttons directly into the product page DOM to faci
 
 - Load as a temporary addon in `about:debugging` (Firefox) or Unpacked Extension in Chrome/Edge.
 - Requires no configuration; works automatically on matching domains.
+
+## Versioning
+
+- The Firefox manifest is the version source of truth: `LekolarEnhancer/manifest.json`.
+- The publish workflow bumps the patch version in both manifests automatically.
+- `sync-edge-variant.ps1` copies shared files to the Edge variant and strips Firefox-only blocks from `content.js`.
+- See `../VERSIONING.md` for the release flow.

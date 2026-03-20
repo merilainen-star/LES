@@ -8,26 +8,28 @@ const DEFAULTS = {
         fi: { enabled: true, url: 'https://www.lekolar.fi/haku/?query=' },
         se: { enabled: false, url: 'https://www.lekolar.se/sok/?query=' },
         no: { enabled: false, url: 'https://www.lekolar.no/sok/?query=' },
-        dk: { enabled: false, url: 'https://www.lekolar.dk/soeg/?query=' }
+        dk: { enabled: false, url: 'https://www.lekolar.dk/sog/?query=' }
     }
 };
 
 const COUNTRY_CODES = ['fi', 'se', 'no', 'dk'];
+const ENTITLEMENT_CACHE_KEY = 'lesSharePointEntitlement';
+const SHAREPOINT_PROBE_URL = 'https://lekolarab.sharepoint.com/_api/web/currentuser?$select=Id,Title';
+const LEKOLAR_HOST_RULES = [
+    { suffix: '.lekolar.fi', pattern: '*://*.lekolar.fi/*' },
+    { suffix: '.lekolar.se', pattern: '*://*.lekolar.se/*' },
+    { suffix: '.lekolar.no', pattern: '*://*.lekolar.no/*' },
+    { suffix: '.lekolar.dk', pattern: '*://*.lekolar.dk/*' }
+];
 
 // DOM refs
 const infiniteScrollEl = document.getElementById('infiniteScroll');
 const copyButtonsEl = document.getElementById('copyButtons');
 const modifierKeyEl = document.getElementById('modifierKey');
 const saveIndicator = document.getElementById('saveIndicator');
-
-// Smart Search refs
-const smartQueryEl = document.getElementById('smartQuery');
-const smartLengthEl = document.getElementById('smartLength');
-const smartWidthEl = document.getElementById('smartWidth');
-const smartColorEl = document.getElementById('smartColor');
-const smartSeriesEl = document.getElementById('smartSeries');
-const smartEcolabelEl = document.getElementById('smartEcolabel');
-const smartSearchBtn = document.getElementById('smartSearchBtn');
+const permissionWarningEl = document.getElementById('permissionWarning');
+const recheckEntitlementBtn = document.getElementById('recheckEntitlementBtn');
+const entitlementStatusEl = document.getElementById('entitlementStatus');
 
 // Country refs
 const countryRadios = {};
@@ -97,6 +99,177 @@ function showSaveIndicator() {
     }, 1500);
 }
 
+function updatePermissionWarning(hasAccess) {
+    if (!permissionWarningEl) return;
+    permissionWarningEl.classList.toggle('hidden', hasAccess);
+}
+
+function getLekolarPatternForUrl(url) {
+    if (!url) return null;
+    try {
+        const host = new URL(url).hostname.toLowerCase();
+        for (const rule of LEKOLAR_HOST_RULES) {
+            const bare = rule.suffix.replace(/^\./, '');
+            if (host === bare || host.endsWith(rule.suffix)) {
+                return rule.pattern;
+            }
+        }
+    } catch (e) {
+        return null;
+    }
+    return null;
+}
+
+function withActiveTab(callback) {
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        const tab = tabs && tabs.length ? tabs[0] : null;
+        callback(tab);
+    });
+}
+
+function checkLekolarPermissions() {
+    if (!chrome.permissions || !chrome.permissions.contains) {
+        // If API is unavailable, don't show a false warning.
+        updatePermissionWarning(true);
+        return;
+    }
+
+    withActiveTab((tab) => {
+        const originPattern = getLekolarPatternForUrl(tab && tab.url ? tab.url : '');
+        if (!originPattern) {
+            updatePermissionWarning(true);
+            return;
+        }
+
+        chrome.permissions.contains({ origins: [originPattern] }, (hasAccess) => {
+            if (chrome.runtime.lastError) {
+                console.warn('LES popup: permission check failed', chrome.runtime.lastError.message);
+                updatePermissionWarning(true);
+                return;
+            }
+            updatePermissionWarning(Boolean(hasAccess));
+        });
+    });
+}
+
+function setEntitlementStatus(text, tone = '') {
+    if (!entitlementStatusEl) return;
+    entitlementStatusEl.textContent = text;
+    entitlementStatusEl.classList.remove('ok', 'warn', 'error');
+    if (tone) entitlementStatusEl.classList.add(tone);
+}
+
+function renderEntitlementStatus(result) {
+    if (!result || !result.status) {
+        setEntitlementStatus('Status: Unknown', 'warn');
+        return;
+    }
+    if (result.status === 'entitled') {
+        setEntitlementStatus('Status: Enabled (SharePoint access detected)', 'ok');
+    } else if (result.status === 'login_required') {
+        setEntitlementStatus('Status: Sign in to SharePoint and re-check', 'warn');
+    } else if (result.status === 'no_access') {
+        setEntitlementStatus('Status: SharePoint access missing', 'warn');
+    } else {
+        const details = result.error ? ` (${result.error})` : '';
+        setEntitlementStatus(`Status: Could not verify now${details}`, 'error');
+    }
+}
+
+function loadCachedEntitlementStatus() {
+    if (!chrome.storage || !chrome.storage.local) {
+        setEntitlementStatus('Status: Unknown', 'warn');
+        return;
+    }
+    chrome.storage.local.get(ENTITLEMENT_CACHE_KEY, (data) => {
+        if (chrome.runtime.lastError) {
+            setEntitlementStatus('Status: Could not read cache', 'error');
+            return;
+        }
+        renderEntitlementStatus(data[ENTITLEMENT_CACHE_KEY]);
+    });
+}
+
+function requestEntitlementProbe() {
+    return new Promise((resolve) => {
+        chrome.runtime.sendMessage({ action: 'probeSharePointEntitlement', probeUrl: SHAREPOINT_PROBE_URL }, (response) => {
+            if (chrome.runtime.lastError) {
+                resolve({
+                    status: 'error',
+                    entitled: false,
+                    error: chrome.runtime.lastError.message,
+                    checkedAt: Date.now()
+                });
+                return;
+            }
+            resolve(response || {
+                status: 'error',
+                entitled: false,
+                error: 'empty_response',
+                checkedAt: Date.now()
+            });
+        });
+    });
+}
+
+function persistEntitlementResult(result) {
+    return new Promise((resolve) => {
+        if (!chrome.storage || !chrome.storage.local) {
+            resolve();
+            return;
+        }
+        const shouldCache = result && (
+            result.status === 'entitled' ||
+            result.status === 'login_required' ||
+            result.status === 'no_access'
+        );
+        if (shouldCache) {
+            chrome.storage.local.set({ [ENTITLEMENT_CACHE_KEY]: result }, () => resolve());
+        } else if (result && result.status === 'error') {
+            // Keep the previous known state if probe failed transiently.
+            resolve();
+        } else {
+            chrome.storage.local.remove(ENTITLEMENT_CACHE_KEY, () => resolve());
+        }
+    });
+}
+
+function notifyActiveTabRefresh() {
+    return new Promise((resolve) => {
+        withActiveTab((tab) => {
+            if (!tab || !tab.id) {
+                resolve();
+                return;
+            }
+            chrome.tabs.sendMessage(tab.id, { action: 'lesRefreshEntitlement' }, () => {
+                // Ignore "receiving end" errors if content script isn't on the active tab.
+                resolve();
+            });
+        });
+    });
+}
+
+async function recheckEntitlementNow() {
+    if (!recheckEntitlementBtn) return;
+    recheckEntitlementBtn.disabled = true;
+    recheckEntitlementBtn.textContent = 'Checking...';
+    setEntitlementStatus('Status: Checking SharePoint access...', 'warn');
+
+    const result = await requestEntitlementProbe();
+    await persistEntitlementResult(result);
+    await notifyActiveTabRefresh();
+    if (result.status === 'error') {
+        loadCachedEntitlementStatus();
+        const details = result.error ? ` (${result.error})` : '';
+        setEntitlementStatus(`Status: Could not verify now${details}. Kept previous access state.`, 'error');
+    } else {
+        renderEntitlementStatus(result);
+    }
+
+    recheckEntitlementBtn.disabled = false;
+    recheckEntitlementBtn.textContent = 'Re-check SharePoint Access';
+}
+
 // Auto-save on change
 infiniteScrollEl.addEventListener('change', saveSettings);
 copyButtonsEl.addEventListener('change', saveSettings);
@@ -112,32 +285,11 @@ COUNTRY_CODES.forEach(code => {
     });
 });
 
-// Smart Search Action
-smartSearchBtn.addEventListener('click', () => {
-    // Determine active country baseUrl
-    let baseUrl = 'https://www.lekolar.fi/haku/';
-    for (const code of COUNTRY_CODES) {
-        if (countryRadios[code].checked) {
-            // Strip the '?query=' part if it exists in the preset url
-            baseUrl = countryUrls[code].value.split('?')[0];
-            break;
-        }
-    }
-
-    const query = smartQueryEl.value.trim();
-    const filters = {
-        length: smartLengthEl.value.trim(),
-        width: smartWidthEl.value.trim(),
-        color: smartColorEl.value.trim(),
-        series: smartSeriesEl.value.trim(),
-        ecolabel: smartEcolabelEl.value.trim()
-    };
-
-    // Use global from searchUtils.js
-    const searchUrl = window.buildLekolarSearchUrl(baseUrl, query, filters);
-    chrome.tabs.create({ url: searchUrl });
-});
-
 // Initialize
 document.getElementById('versionLabel').textContent = 'v' + chrome.runtime.getManifest().version;
 loadSettings();
+checkLekolarPermissions();
+loadCachedEntitlementStatus();
+if (recheckEntitlementBtn) {
+    recheckEntitlementBtn.addEventListener('click', recheckEntitlementNow);
+}

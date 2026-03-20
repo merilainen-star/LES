@@ -6,6 +6,8 @@ on:
     paths:
       - 'LekolarEnhancer/**'
       - 'LekolarEnhancer-Edge/**'
+      - 'sync-edge-variant.ps1'
+      - 'VERSIONING.md'
 
 jobs:
   # ── 1. Bump versions and commit back ──────────────────────────────────────

@@ -18,6 +18,15 @@
         <span class="version" id="versionLabel"></span>
       </div>
     </div>
+    <div id="permissionWarning" class="permission-warning hidden">
+      Lekolar site permission is not granted. Click the extension icon on a Lekolar page and allow site access. (This warning is separate from SharePoint sign-in status below.)
+    </div>
+    <div class="section">
+      <h2>Extended Features Access</h2>
+      <p class="hint">Sign in to SharePoint, then verify access.</p>
+      <button id="recheckEntitlementBtn" class="primary-btn secondary-btn">Re-check SharePoint Access</button>
+      <p id="entitlementStatus" class="hint status-line">Status: Unknown</p>
+    </div>
 
     <!-- Feature Toggles -->
     <div class="section">
@@ -98,33 +107,12 @@
       </div>
     </div>
 
-    <!-- Smart Search -->
-    <div class="section">
-      <h2>Smart Search</h2>
-      <p class="hint">Generate exact filter URLs from attributes.</p>
-      
-      <div class="search-form">
-        <input type="text" id="smartQuery" class="text-input" placeholder="Query (e.g. tuoli)">
-        
-        <div class="input-grid">
-          <input type="number" id="smartLength" class="text-input" placeholder="Length cm">
-          <input type="number" id="smartWidth" class="text-input" placeholder="Width cm">
-          <input type="text" id="smartColor" class="text-input" placeholder="Color">
-          <input type="text" id="smartSeries" class="text-input" placeholder="Series (e.g. Lex)">
-          <input type="text" id="smartEcolabel" class="text-input" placeholder="Ecolabel (e.g. FSC)">
-        </div>
-        
-        <button id="smartSearchBtn" class="primary-btn">Open Search</button>
-      </div>
-    </div>
-
     <!-- Save indicator -->
     <div class="save-indicator" id="saveIndicator">
       ✓ Settings saved
     </div>
   </div>
 
-  <script src="searchUtils.js"></script>
   <script src="popup.js"></script>
 </body>
 
