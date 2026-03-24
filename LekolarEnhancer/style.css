@@ -104,6 +104,11 @@ article:hover .lekolar-hover-copy {
     pointer-events: auto;
 }
 
+html.les-hide-environmental-logo .product-flags img[src*="toxicFree"],
+html.les-hide-environmental-logo .product-flags img[alt*="Haitta-aineeton"] {
+    display: none !important;
+}
+
 /* --- Price Sorting --- */
 .lekolar-sort-container {
     padding: 10px 15px;

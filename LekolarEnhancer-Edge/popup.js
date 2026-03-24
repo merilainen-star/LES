@@ -3,6 +3,7 @@
 const DEFAULTS = {
     infiniteScroll: true,
     copyButtons: true,
+    hideEnvironmentalLogo: false,
     modifierKey: 'shiftKey',
     countries: {
         fi: { enabled: true, url: 'https://www.lekolar.fi/haku/?query=' },
@@ -25,6 +26,7 @@ const LEKOLAR_HOST_RULES = [
 // DOM refs
 const infiniteScrollEl = document.getElementById('infiniteScroll');
 const copyButtonsEl = document.getElementById('copyButtons');
+const hideEnvironmentalLogoEl = document.getElementById('hideEnvironmentalLogo');
 const modifierKeyEl = document.getElementById('modifierKey');
 const saveIndicator = document.getElementById('saveIndicator');
 const permissionWarningEl = document.getElementById('permissionWarning');
@@ -52,6 +54,7 @@ function loadSettings() {
 
         infiniteScrollEl.checked = settings.infiniteScroll;
         copyButtonsEl.checked = settings.copyButtons;
+        hideEnvironmentalLogoEl.checked = settings.hideEnvironmentalLogo;
         modifierKeyEl.value = settings.modifierKey;
 
         // Find which country is enabled and select its radio
@@ -82,6 +85,7 @@ function saveSettings() {
     const settings = {
         infiniteScroll: infiniteScrollEl.checked,
         copyButtons: copyButtonsEl.checked,
+        hideEnvironmentalLogo: hideEnvironmentalLogoEl.checked,
         modifierKey: modifierKeyEl.value,
         countries
     };
@@ -273,6 +277,7 @@ async function recheckEntitlementNow() {
 // Auto-save on change
 infiniteScrollEl.addEventListener('change', saveSettings);
 copyButtonsEl.addEventListener('change', saveSettings);
+hideEnvironmentalLogoEl.addEventListener('change', saveSettings);
 modifierKeyEl.addEventListener('change', saveSettings);
 
 COUNTRY_CODES.forEach(code => {

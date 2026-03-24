@@ -2,6 +2,7 @@
 let currentSettings = {
     infiniteScroll: true,
     copyButtons: true,
+    hideEnvironmentalLogo: false,
     modifierKey: 'shiftKey'
 };
 console.info('LES content script loaded');
@@ -406,6 +407,11 @@ function createCopyButton(textGetter, type, options = {}) {
     return button;
 }
 
+function applyEnvironmentalLogoVisibility() {
+    const shouldHide = Boolean(currentSettings.hideEnvironmentalLogo) && isListPage();
+    document.documentElement.classList.toggle('les-hide-environmental-logo', shouldHide);
+}
+
 function findAndInject() {
     if (!document.body) return; // Wait for body
 
@@ -731,15 +737,25 @@ function injectSpecSearch() {
                 const wrapper = bubble.parentElement;
                 wrapper.parentElement.insertBefore(link, wrapper.nextSibling);
             } else {
-                const link = document.createElement('a');
-                link.className = 'les-spec-link';
-                link.href = window.buildLekolarSearchUrl(baseUrl, '', { [spec.filterKey]: searchValue });
-                link.target = '_blank';
-                link.rel = 'noopener noreferrer';
-                link.title = `Search: ${th.innerText.replace(':', '').trim()} = ${searchValue}`;
-                link.textContent = fullText;
                 valEl.textContent = '';
-                valEl.appendChild(link);
+                const values = ['ecolabel', 'material', 'legMaterial'].includes(spec.filterKey)
+                    ? fullText.split(',').map(part => part.trim()).filter(Boolean)
+                    : [searchValue];
+
+                values.forEach((value, index) => {
+                    if (index > 0) {
+                        valEl.appendChild(document.createTextNode(', '));
+                    }
+
+                    const link = document.createElement('a');
+                    link.className = 'les-spec-link';
+                    link.href = window.buildLekolarSearchUrl(baseUrl, '', { [spec.filterKey]: value });
+                    link.target = '_blank';
+                    link.rel = 'noopener noreferrer';
+                    link.title = `Search: ${th.innerText.replace(':', '').trim()} = ${value}`;
+                    link.textContent = value;
+                    valEl.appendChild(link);
+                });
             }
         }
     });
@@ -1515,6 +1531,7 @@ async function loadSettingsAndInit() {
         const items = await storageSyncGet({
             infiniteScroll: true,
             copyButtons: true,
+            hideEnvironmentalLogo: false,
             modifierKey: 'shiftKey'
         });
         currentSettings = items;
@@ -1548,6 +1565,7 @@ function initAll() {
         cleanupRestrictedUi();
     }
 
+    applyEnvironmentalLogoVisibility();
     compactSearchPage();
     if (currentSettings.infiniteScroll) {
         initSearchConsolidation();
