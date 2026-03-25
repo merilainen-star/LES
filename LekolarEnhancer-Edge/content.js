@@ -1134,7 +1134,6 @@ async function loadNextPage(gridContainer, page, debugElement) {
                 gridContainer.appendChild(importedNode);
             });
             
-            // Trigger injection on newly added items
             setTimeout(() => {
                 if (currentSettings.copyButtons) {
                     findAndInject();
