@@ -221,6 +221,15 @@ function classifySharePointResponse(response, bodyText) {
 
 async function probeSharePointEntitlement(probeUrl) {
     const targetUrl = probeUrl || DEFAULT_SHAREPOINT_PROBE_URL;
+    if (!targetUrl.startsWith('https://lekolarab.sharepoint.com/')) {
+        return {
+            status: 'error',
+            entitled: false,
+            checkedUrl: targetUrl,
+            error: 'invalid_probe_url',
+            checkedAt: Date.now()
+        };
+    }
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), SHAREPOINT_REQUEST_TIMEOUT_MS);
 

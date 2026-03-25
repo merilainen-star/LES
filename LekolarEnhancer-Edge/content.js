@@ -35,6 +35,24 @@ function storageLocalRemove(key) {
     return new Promise((resolve) => chrome.storage.local.remove(key, resolve));
 }
 
+function escapeHtml(str) {
+    return String(str).replace(/&/g, '&amp;').replace(/"/g, '&quot;')
+        .replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function sanitizeImportedNode(node) {
+    if (!node || !node.querySelectorAll) return node;
+    node.querySelectorAll('script').forEach(s => s.remove());
+    const all = [node, ...node.querySelectorAll('*')];
+    for (const el of all) {
+        if (!el.attributes) continue;
+        for (const attr of Array.from(el.attributes)) {
+            if (/^on/i.test(attr.name)) el.removeAttribute(attr.name);
+        }
+    }
+    return node;
+}
+
 function canUseRestrictedFeatures() {
     return restrictedFeatureAccess.entitled === true;
 }
@@ -366,7 +384,7 @@ function createCopyButton(textGetter, type, options = {}) {
 
             if (name && number) {
                 const plainText = `${number} ${name} - ${url}`;
-                const htmlText = `<a href="${url}">${number} ${name}</a>`;
+                const htmlText = `<a href="${escapeHtml(url)}">${escapeHtml(number)} ${escapeHtml(name)}</a>`;
 
                 try {
                     const clipboardItem = new ClipboardItem({
@@ -1112,7 +1130,7 @@ async function loadNextPage(gridContainer, page, debugElement) {
             if (newItems.length === 0) return { success: false, message: 'No items found in grid.' };
 
             newItems.forEach(item => {
-                const importedNode = document.importNode(item, true);
+                const importedNode = sanitizeImportedNode(document.importNode(item, true));
                 gridContainer.appendChild(importedNode);
             });
             
@@ -1120,7 +1138,6 @@ async function loadNextPage(gridContainer, page, debugElement) {
             setTimeout(() => {
                 if (currentSettings.copyButtons) {
                     findAndInject();
-                    observeNewProductCards();
                 }
             }, 150);
 
@@ -1138,57 +1155,6 @@ async function loadNextPage(gridContainer, page, debugElement) {
 // --- Prefetching Logic for Configurable Products ---
 
 const fetchedProducts = new Map(); // Cache URL -> Product Number
-const fetchQueue = [];
-let isFetching = false;
-
-function fetchProductNumber(url) {
-    return new Promise((resolve, reject) => {
-        if (fetchedProducts.has(url)) {
-            resolve(fetchedProducts.get(url));
-            return;
-        }
-
-        // Limit cache size to prevent memory leak
-        if (fetchedProducts.size >= 500) {
-            const firstKey = fetchedProducts.keys().next().value;
-            fetchedProducts.delete(firstKey);
-        }
-
-        fetchQueue.push({ url, resolve, reject });
-        processFetchQueue();
-    });
-}
-
-async function processFetchQueue() {
-    if (isFetching || fetchQueue.length === 0) return;
-
-    isFetching = true;
-    const { url, resolve, reject } = fetchQueue.shift();
-
-    try {
-        const response = await fetch(url);
-        const text = await response.text();
-        const parser = new DOMParser();
-        const doc = parser.parseFromString(text, 'text/html');
-
-        const productNumber = extractProductNumberFromDoc(doc);
-
-        if (productNumber) {
-            fetchedProducts.set(url, productNumber);
-            resolve(productNumber);
-        } else {
-            resolve(null);
-        }
-
-    } catch (error) {
-        console.error("Error fetching product page:", error);
-        resolve(null);
-    } finally {
-        isFetching = false;
-        setTimeout(processFetchQueue, 300);
-    }
-}
-
 // Extract product number from a parsed HTML document
 function extractProductNumberFromDoc(doc) {
     let productNumber = null;
@@ -1283,13 +1249,9 @@ async function fetchProductNumberDirect(url) {
 }
 
 
-// --- Hover-to-Reveal + Idle Prefetch System ---
+// --- Hover-to-Reveal System ---
 
 const hoverInitialized = new WeakSet();
-const prefetchQueued = new Set();
-const visibleProductCards = new Set();
-let prefetchObserver = null;
-let idlePrefetchScheduled = false;
 let hoverSystemInitialized = false;
 
 const PRODUCT_CARD_SELECTOR = '.product-item, .category-product, .product-list-item, article';
@@ -1318,7 +1280,11 @@ function findProductCard(element) {
 
 function getProductCardUrl(card) {
     const link = card.querySelector('a[href*="/verkkokauppa/"], a[href*="/sortiment/"]');
-    return link ? link.href : null;
+    if (!link) return null;
+    try {
+        if (new URL(link.href).origin !== window.location.origin) return null;
+    } catch (e) { return null; }
+    return link.href;
 }
 
 function getProductCardName(card) {
@@ -1403,82 +1369,6 @@ function initHoverCopySystem() {
         });
     }
 
-    // Start / continue idle background prefetch
-    initIdlePrefetch();
-}
-
-function initIdlePrefetch() {
-    if (prefetchObserver) {
-        // Already initialized — just observe any new cards
-        observeNewProductCards();
-        return;
-    }
-
-    prefetchObserver = new IntersectionObserver((entries) => {
-        entries.forEach(entry => {
-            if (entry.isIntersecting) {
-                visibleProductCards.add(entry.target);
-            } else {
-                visibleProductCards.delete(entry.target);
-            }
-        });
-        scheduleIdlePrefetch();
-    }, { rootMargin: '300px' });
-
-    observeNewProductCards();
-}
-
-function observeNewProductCards() {
-    if (!prefetchObserver) return;
-
-    const cards = document.querySelectorAll(PRODUCT_CARD_SELECTOR);
-    cards.forEach(card => {
-        const url = getProductCardUrl(card);
-        if (url && !fetchedProducts.has(url) && !prefetchQueued.has(url)) {
-            prefetchObserver.observe(card);
-        }
-    });
-}
-
-function scheduleIdlePrefetch() {
-    if (idlePrefetchScheduled || visibleProductCards.size === 0) return;
-    idlePrefetchScheduled = true;
-
-    const callback = (deadline) => {
-        idlePrefetchScheduled = false;
-
-        for (const card of visibleProductCards) {
-            const url = getProductCardUrl(card);
-            if (!url || fetchedProducts.has(url) || prefetchQueued.has(url)) {
-                visibleProductCards.delete(card);
-                prefetchObserver.unobserve(card);
-                continue;
-            }
-
-            if (deadline.timeRemaining() > 5 || deadline.didTimeout) {
-                prefetchQueued.add(url);
-                fetchProductNumber(url).then(number => {
-                    if (number) {
-                        injectCopyButtonOnCard(card, number);
-                    }
-                });
-                visibleProductCards.delete(card);
-                prefetchObserver.unobserve(card);
-
-                // Schedule next item
-                scheduleIdlePrefetch();
-                return;
-            }
-            break; // No idle time remaining
-        }
-    };
-
-    if ('requestIdleCallback' in window) {
-        requestIdleCallback(callback, { timeout: 10000 });
-    } else {
-        // Fallback for browsers without requestIdleCallback
-        setTimeout(() => callback({ timeRemaining: () => 50, didTimeout: true }), 2000);
-    }
 }
 
 
@@ -1612,7 +1502,6 @@ const pageObserver = new MutationObserver((mutations) => {
             if (currentSettings.infiniteScroll) initSearchConsolidation();
             if (currentSettings.copyButtons) {
                 findAndInject();
-                observeNewProductCards();
             }
         }, 250);
     }
