@@ -19,6 +19,7 @@ if (-not (Test-Path -LiteralPath $edgePath)) {
 
 $filesToCopy = @(
     "background.js",
+    "content.js",
     "popup.html",
     "popup.js",
     "popup.css",
@@ -38,25 +39,4 @@ foreach ($relativeFile in $filesToCopy) {
     Copy-Item -LiteralPath $sourceFile -Destination $targetFile -Force
     Write-Host "Synced $relativeFile"
 }
-
-$firefoxContentPath = Join-Path $firefoxPath "content.js"
-$edgeContentPath = Join-Path $edgePath "content.js"
-
-if (-not (Test-Path -LiteralPath $firefoxContentPath)) {
-    throw "Missing source content script: $firefoxContentPath"
-}
-
-$firefoxContent = [System.IO.File]::ReadAllText($firefoxContentPath)
-$startCount = ([regex]::Matches($firefoxContent, "@FIREFOX_ONLY_START")).Count
-$endCount = ([regex]::Matches($firefoxContent, "@FIREFOX_ONLY_END")).Count
-
-if ($startCount -ne $endCount) {
-    throw "Unbalanced Firefox-only markers in content.js (start=$startCount, end=$endCount)."
-}
-
-$pattern = '(?ms)^[ \t]*//\s*@FIREFOX_ONLY_START[^\r\n]*\r?\n.*?^[ \t]*//\s*@FIREFOX_ONLY_END[^\r\n]*\r?\n?'
-$edgeContent = [regex]::Replace($firefoxContent, $pattern, "")
-[System.IO.File]::WriteAllText($edgeContentPath, $edgeContent, [System.Text.UTF8Encoding]::new($false))
-
-Write-Host "Generated content.js for Edge without Firefox-only blocks."
 Write-Host "Edge variant sync complete."

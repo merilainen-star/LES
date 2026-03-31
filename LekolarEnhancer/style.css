@@ -104,8 +104,9 @@ article:hover .lekolar-hover-copy {
     pointer-events: auto;
 }
 
-html.les-hide-environmental-logo .product-flags img[src*="toxicFree"],
-html.les-hide-environmental-logo .product-flags img[alt*="Haitta-aineeton"] {
+/* Hide product flags (environmental labels, campaigns, discounts, etc.). */
+html.les-hide-environmental-logo :is(.product-item, .category-product, .product-list-item, article)
+  :is(.product-flags, .product-flag, [class*="product-flag"], [class*="product-flags"]) {
     display: none !important;
 }
 

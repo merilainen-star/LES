@@ -67,10 +67,15 @@ function buildLekolarSearchUrl(baseUrl, query, filters = {}) {
     return url;
 }
 
-// Export for module usage, but also assign to window for older setups
+// Export for module usage, and expose helpers on whichever global scope exists.
+const SEARCH_UTILS_GLOBAL =
+    typeof globalThis !== 'undefined'
+        ? globalThis
+        : (typeof self !== 'undefined' ? self : (typeof window !== 'undefined' ? window : null));
+
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = { buildLekolarSearchUrl, PIM_TO_FACET_MAP };
-} else {
-    window.buildLekolarSearchUrl = buildLekolarSearchUrl;
-    window.PIM_TO_FACET_MAP = PIM_TO_FACET_MAP;
+} else if (SEARCH_UTILS_GLOBAL) {
+    SEARCH_UTILS_GLOBAL.buildLekolarSearchUrl = buildLekolarSearchUrl;
+    SEARCH_UTILS_GLOBAL.PIM_TO_FACET_MAP = PIM_TO_FACET_MAP;
 }
