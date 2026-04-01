@@ -40,6 +40,63 @@ function escapeHtml(str) {
         .replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+const FALLBACK_SPEC_FACET_MAP = {
+    length: 'itemLength_cm',
+    width: 'itemWidth_cm',
+    height: 'itemHeight_cm',
+    depth: 'itemDepth_cm',
+    diameter: 'itemDiameter_cm',
+    seatHeight: 'itemseatheight_cm',
+    seatWidth: null,
+    seatDepth: null,
+    color: 'itemcolortext',
+    material: 'itemmaterialfurniture',
+    legMaterial: 'itemlegmaterial',
+    shape: 'itemtabletopshape',
+    ecolabel: 'prodecolabelling',
+    toxicFree: 'toxicfree',
+    grade: 'grades',
+    series: 'product_included_in_series'
+};
+
+function buildSpecSearchUrl(baseUrl, query, filters = {}) {
+    const globalScope = typeof globalThis !== 'undefined' ? globalThis : window;
+    if (typeof globalScope.buildLekolarSearchUrl === 'function') {
+        return globalScope.buildLekolarSearchUrl(baseUrl, query, filters);
+    }
+
+    const separator = baseUrl.includes('?') ? '&' : '?';
+    let url = baseUrl;
+    if (query) {
+        url += `${separator}query=${encodeURIComponent(query)}`;
+    } else if (separator === '?') {
+        url += '?';
+    }
+
+    const params = [];
+    for (const [key, value] of Object.entries(filters)) {
+        if (!value) continue;
+
+        let facetField = FALLBACK_SPEC_FACET_MAP[key];
+        if (facetField === null) continue;
+        if (facetField === undefined) facetField = key;
+
+        let processedValue = value;
+        if (typeof processedValue === 'string') {
+            processedValue = processedValue.replace(',', '.');
+        }
+
+        params.push(`facet=${encodeURIComponent(facetField + ':' + processedValue)}`);
+    }
+
+    if (params.length > 0) {
+        const joinStr = url.includes('?') ? (url.endsWith('?') ? '' : '&') : '?';
+        url += joinStr + params.join('&');
+    }
+
+    return url;
+}
+
 function sanitizeImportedNode(node) {
     if (!node || !node.querySelectorAll) return node;
     node.querySelectorAll('script').forEach(s => s.remove());
@@ -713,7 +770,7 @@ function injectSpecSearch() {
     matchedRows.forEach(({ row, th, valEl, searchValue, spec }) => {
         if (spec.filterKey in facetMap && facetMap[spec.filterKey] === null) return;
 
-        const hasBuildUrl = typeof window.buildLekolarSearchUrl === 'function';
+        const hasBuildUrl = typeof buildSpecSearchUrl === 'function';
         const fullText = valEl.innerText.trim();
 
         if (spec.type === 'dimension') {
@@ -722,7 +779,7 @@ function injectSpecSearch() {
                 if (numericPart) {
                     const link = document.createElement('a');
                     link.className = 'les-spec-link';
-                    link.href = window.buildLekolarSearchUrl(baseUrl, '', { [spec.filterKey]: searchValue });
+                    link.href = buildSpecSearchUrl(baseUrl, '', { [spec.filterKey]: searchValue });
                     link.target = '_blank';
                     link.rel = 'noopener noreferrer';
                     link.title = `Search: ${th.innerText.replace(':', '').trim()} ${numericPart[0]}`;
@@ -747,7 +804,7 @@ function injectSpecSearch() {
             if (bubble && bubble.title) {
                 const link = document.createElement('a');
                 link.className = 'les-spec-link';
-                link.href = window.buildLekolarSearchUrl(baseUrl, '', { [spec.filterKey]: searchValue });
+                link.href = buildSpecSearchUrl(baseUrl, '', { [spec.filterKey]: searchValue });
                 link.target = '_blank';
                 link.rel = 'noopener noreferrer';
                 link.title = `Search: ${searchValue}`;
@@ -767,7 +824,7 @@ function injectSpecSearch() {
 
                     const link = document.createElement('a');
                     link.className = 'les-spec-link';
-                    link.href = window.buildLekolarSearchUrl(baseUrl, '', { [spec.filterKey]: value });
+                    link.href = buildSpecSearchUrl(baseUrl, '', { [spec.filterKey]: value });
                     link.target = '_blank';
                     link.rel = 'noopener noreferrer';
                     link.title = `Search: ${th.innerText.replace(':', '').trim()} = ${value}`;
@@ -827,8 +884,8 @@ function injectSpecSearch() {
                 filters[cb.dataset.filterKey] = cb.dataset.searchValue;
             });
 
-            if (typeof window.buildLekolarSearchUrl === 'function') {
-                const searchUrl = window.buildLekolarSearchUrl(baseUrl, '', filters);
+            if (typeof buildSpecSearchUrl === 'function') {
+                const searchUrl = buildSpecSearchUrl(baseUrl, '', filters);
                 const opened = window.open(searchUrl, '_blank', 'noopener,noreferrer');
                 if (opened) opened.opener = null;
             }
