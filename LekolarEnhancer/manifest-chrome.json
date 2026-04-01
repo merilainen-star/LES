@@ -12,7 +12,8 @@
     "*://*.lekolar.fi/*",
     "*://*.lekolar.se/*",
     "*://*.lekolar.no/*",
-    "*://*.lekolar.dk/*"
+    "*://*.lekolar.dk/*",
+    "https://api.mymemory.translated.net/*"
   ],
   "action": {
     "default_popup": "popup.html",

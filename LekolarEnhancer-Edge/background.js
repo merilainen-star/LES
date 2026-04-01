@@ -267,21 +267,146 @@ async function probeSharePointEntitlement(probeUrl) {
     }
 }
 
+async function fetchRemoteHtml(targetUrl) {
+    if (!/^https:\/\/www\.lekolar\.(fi|se|no|dk)\//i.test(targetUrl || '')) {
+        return {
+            ok: false,
+            error: 'invalid_remote_url',
+            url: targetUrl || ''
+        };
+    }
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 12000);
+
+    try {
+        const response = await fetch(targetUrl, {
+            method: 'GET',
+            credentials: 'omit',
+            cache: 'no-store',
+            redirect: 'follow',
+            signal: controller.signal
+        });
+
+        if (!response.ok) {
+            return {
+                ok: false,
+                error: `http_${response.status}`,
+                status: response.status,
+                url: response.url || targetUrl
+            };
+        }
+
+        const html = await response.text();
+        return {
+            ok: true,
+            html,
+            url: response.url || targetUrl,
+            status: response.status
+        };
+    } catch (error) {
+        return {
+            ok: false,
+            error: (error && error.name === 'AbortError') ? 'timeout' : ((error && error.message) ? error.message : String(error)),
+            url: targetUrl
+        };
+    } finally {
+        clearTimeout(timeoutId);
+    }
+}
+
+async function translateTextViaMyMemory(text, sourceLang, targetLang) {
+    const normalizedText = String(text || '').trim();
+    if (!normalizedText) {
+        return { ok: false, error: 'empty_text' };
+    }
+
+    const source = String(sourceLang || 'sv').trim().toLowerCase();
+    const target = String(targetLang || 'en').trim().toLowerCase();
+    const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(normalizedText)}&langpair=${encodeURIComponent(source)}|${encodeURIComponent(target)}`;
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 12000);
+
+    try {
+        const response = await fetch(url, {
+            method: 'GET',
+            cache: 'no-store',
+            redirect: 'follow',
+            signal: controller.signal
+        });
+
+        if (!response.ok) {
+            return { ok: false, error: `translation_http_${response.status}` };
+        }
+
+        const payload = await response.json();
+        const translatedText = payload && payload.responseData && payload.responseData.translatedText
+            ? String(payload.responseData.translatedText).trim()
+            : '';
+
+        if (!translatedText) {
+            return { ok: false, error: 'translation_empty' };
+        }
+
+        return {
+            ok: true,
+            translation: translatedText
+        };
+    } catch (error) {
+        return {
+            ok: false,
+            error: (error && error.name === 'AbortError') ? 'translation_timeout' : ((error && error.message) ? error.message : String(error))
+        };
+    } finally {
+        clearTimeout(timeoutId);
+    }
+}
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    if (!message || message.action !== 'probeSharePointEntitlement') {
+    if (!message || !message.action) {
         return;
     }
 
-    probeSharePointEntitlement(message.probeUrl)
-        .then(sendResponse)
-        .catch((error) => {
-            sendResponse({
-                status: 'error',
-                entitled: false,
-                error: (error && error.message) ? error.message : String(error),
-                checkedAt: Date.now()
+    if (message.action === 'probeSharePointEntitlement') {
+        probeSharePointEntitlement(message.probeUrl)
+            .then(sendResponse)
+            .catch((error) => {
+                sendResponse({
+                    status: 'error',
+                    entitled: false,
+                    error: (error && error.message) ? error.message : String(error),
+                    checkedAt: Date.now()
+                });
             });
-        });
 
-    return true;
+        return true;
+    }
+
+    if (message.action === 'lesFetchRemoteHtml') {
+        fetchRemoteHtml(message.url)
+            .then(sendResponse)
+            .catch((error) => {
+                sendResponse({
+                    ok: false,
+                    error: (error && error.message) ? error.message : String(error),
+                    url: message.url || ''
+                });
+            });
+
+        return true;
+    }
+
+    if (message.action === 'lesTranslateText') {
+        translateTextViaMyMemory(message.text, message.sourceLang, message.targetLang)
+            .then(sendResponse)
+            .catch((error) => {
+                sendResponse({
+                    ok: false,
+                    error: (error && error.message) ? error.message : String(error)
+                });
+            });
+
+        return true;
+    }
 });

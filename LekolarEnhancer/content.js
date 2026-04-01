@@ -18,6 +18,7 @@ let restrictedFeatureAccess = {
     error: null
 };
 let entitlementCheckInFlight = null;
+const swedishReferenceCache = new Map();
 
 function storageSyncGet(defaults) {
     return new Promise((resolve) => chrome.storage.sync.get(defaults, resolve));
@@ -38,6 +39,10 @@ function storageLocalRemove(key) {
 function escapeHtml(str) {
     return String(str).replace(/&/g, '&amp;').replace(/"/g, '&quot;')
         .replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function normalizeWhitespace(value) {
+    return String(value || '').replace(/\s+/g, ' ').trim();
 }
 
 const FALLBACK_SPEC_FACET_MAP = {
@@ -133,6 +138,19 @@ function cleanupRestrictedUi() {
 
     const specSearchBtn = document.querySelector('.les-spec-search-btn');
     if (specSearchBtn) specSearchBtn.remove();
+
+    const buttonsBar = document.querySelector('.les-buttons-bar');
+    if (buttonsBar && buttonsBar.children.length === 0) {
+        buttonsBar.remove();
+    }
+}
+
+function cleanupSwedishReferenceUi() {
+    const referenceBtn = document.querySelector('.les-sv-reference-btn');
+    if (referenceBtn) referenceBtn.remove();
+
+    const referencePanel = document.querySelector('.les-sv-reference-panel');
+    if (referencePanel) referencePanel.remove();
 
     const buttonsBar = document.querySelector('.les-buttons-bar');
     if (buttonsBar && buttonsBar.children.length === 0) {
@@ -340,6 +358,80 @@ function getProductName() {
     return h1 ? h1.innerText.trim() : null;
 }
 
+function getMainProductCode() {
+    const productRoot = document.querySelector('.product-page-wrapper[data-productnumber], .jsProductPage[data-productnumber], [data-productnumber]');
+    if (productRoot && productRoot.dataset && productRoot.dataset.productnumber) {
+        return normalizeWhitespace(productRoot.dataset.productnumber);
+    }
+
+    const mediaItem = document.querySelector('.js-productImage[data-productnumber], [data-productnumber]');
+    if (mediaItem && mediaItem.dataset && mediaItem.dataset.productnumber) {
+        return normalizeWhitespace(mediaItem.dataset.productnumber);
+    }
+
+    return '';
+}
+
+function getCurrentDescriptionElement() {
+    return document.querySelector('.product-info .description .description-wrapper, .product-info .description, .description-wrapper');
+}
+
+function getCurrentDescriptionText() {
+    const el = getCurrentDescriptionElement();
+    return el ? normalizeWhitespace(el.textContent) : '';
+}
+
+function getCurrentCountryCode() {
+    const host = window.location.hostname.toLowerCase();
+    if (host.endsWith('.lekolar.fi')) return 'fi';
+    if (host.endsWith('.lekolar.se')) return 'se';
+    if (host.endsWith('.lekolar.no')) return 'no';
+    if (host.endsWith('.lekolar.dk')) return 'dk';
+    return 'local';
+}
+
+function getCountryLabel(code) {
+    const labels = {
+        fi: 'Current page (FI)',
+        se: 'Current page (SE)',
+        no: 'Current page (NO)',
+        dk: 'Current page (DK)',
+        local: 'Current page'
+    };
+    return labels[code] || 'Current page';
+}
+
+function getInlineTranslationLanguage() {
+    const code = getCurrentCountryCode();
+    if (code === 'fi') return 'fi';
+    if (code === 'no') return 'no';
+    if (code === 'dk') return 'da';
+    return 'en';
+}
+
+function ensureProductActionBar() {
+    let buttonsBar = document.querySelector('.les-buttons-bar');
+    if (buttonsBar) return buttonsBar;
+
+    buttonsBar = document.createElement('div');
+    buttonsBar.className = 'les-buttons-bar';
+
+    const complianceBtn = document.querySelector('.lekolar-compliance-btn');
+    if (complianceBtn && complianceBtn.parentElement) {
+        complianceBtn.parentElement.insertBefore(buttonsBar, complianceBtn);
+        buttonsBar.appendChild(complianceBtn);
+        return buttonsBar;
+    }
+
+    const sidebar = document.querySelector('.product-properties, .product-attributes, .product-details-sidebar, .product-specs');
+    if (sidebar) {
+        sidebar.appendChild(buttonsBar);
+        return buttonsBar;
+    }
+
+    return null;
+}
+
 function createCopyButton(textGetter, type, options = {}) {
     const button = document.createElement('button');
     button.className = 'lekolar-copy-btn';
@@ -482,6 +574,318 @@ function createCopyButton(textGetter, type, options = {}) {
     return button;
 }
 
+function getSwedishReferencePanel() {
+    return document.querySelector('.les-sv-reference-panel');
+}
+
+function ensureSwedishReferencePanel() {
+    let panel = getSwedishReferencePanel();
+    if (panel) return panel;
+
+    panel = document.createElement('section');
+    panel.className = 'les-sv-reference-panel';
+    panel.innerHTML = `
+        <div class="les-sv-reference-header">
+            <div>
+                <strong>Swedish source text</strong>
+                <div class="les-sv-reference-subtitle">Original Swedish product text for quick reference.</div>
+            </div>
+            <button type="button" class="les-sv-reference-close" aria-label="Close Swedish reference">Close</button>
+        </div>
+        <div class="les-sv-reference-status">Loading Swedish reference...</div>
+        <div class="les-sv-reference-body" hidden></div>
+        <div class="les-sv-reference-actions" hidden></div>
+    `;
+
+    const descriptionContainer = document.querySelector('.product-info .description');
+    if (descriptionContainer) {
+        descriptionContainer.insertAdjacentElement('afterend', panel);
+    } else {
+        const productInfo = document.querySelector('.product-info');
+        if (productInfo) productInfo.appendChild(panel);
+    }
+
+    const closeBtn = panel.querySelector('.les-sv-reference-close');
+    if (closeBtn) closeBtn.addEventListener('click', () => panel.remove());
+
+    return panel;
+}
+
+function updateSwedishReferenceButtonState(button, state) {
+    if (!button) return;
+    const label = button.querySelector('.les-sv-reference-label');
+    if (state === 'loading') {
+        button.disabled = true;
+        if (label) label.textContent = 'Loading SV text...';
+    } else {
+        button.disabled = false;
+        if (label) label.textContent = 'SV text';
+    }
+}
+
+function fetchHtmlThroughBackground(url) {
+    return new Promise((resolve, reject) => {
+        chrome.runtime.sendMessage({ action: 'lesFetchRemoteHtml', url }, (response) => {
+            if (chrome.runtime.lastError) {
+                reject(new Error(chrome.runtime.lastError.message));
+                return;
+            }
+            if (!response || response.ok !== true || typeof response.html !== 'string') {
+                reject(new Error((response && response.error) ? response.error : 'fetch_failed'));
+                return;
+            }
+            resolve(response);
+        });
+    });
+}
+
+function requestInlineTranslation(text, targetLang) {
+    return new Promise((resolve, reject) => {
+        chrome.runtime.sendMessage(
+            {
+                action: 'lesTranslateText',
+                text,
+                sourceLang: 'sv',
+                targetLang
+            },
+            (response) => {
+                if (chrome.runtime.lastError) {
+                    reject(new Error(chrome.runtime.lastError.message));
+                    return;
+                }
+                if (!response || response.ok !== true || !response.translation) {
+                    reject(new Error((response && response.error) ? response.error : 'translation_failed'));
+                    return;
+                }
+                resolve(response.translation);
+            }
+        );
+    });
+}
+
+async function fetchHtmlDocument(url) {
+    try {
+        const result = await fetchHtmlThroughBackground(url);
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(result.html, 'text/html');
+        doc.__lesFetchedUrl = result.url || url;
+        return doc;
+    } catch (error) {
+        throw new Error((error && error.message) ? error.message : 'NetworkError when attempting to fetch resource.');
+    }
+}
+
+function findSearchResultProductUrl(doc, identifiers = []) {
+    if (!doc) return null;
+    const cleanedIds = identifiers.map(normalizeWhitespace).filter(Boolean);
+    if (cleanedIds.length === 0) return null;
+
+    for (const productNumber of cleanedIds) {
+        const selectors = [
+            `.buy-info[data-articlenumber="${productNumber}"]`,
+            `.js-buyInfo[data-articlenumber="${productNumber}"]`,
+            `[data-articlenumber="${productNumber}"]`,
+            `[data-articlenr="${productNumber}"]`,
+            `[data-articleNumber="${productNumber}"]`,
+            `[data-productnumber="${productNumber}"]`
+        ];
+
+        for (const selector of selectors) {
+            const hit = doc.querySelector(selector);
+            if (!hit) continue;
+            const card = hit.closest('.product-item, .category-product, .product-list-item, article, li, .swiper-slide');
+            const link = card ? card.querySelector('a[href*="/sortiment/"], a[href*="/verkkokauppa/"]') : null;
+            if (link && link.href) return link.href;
+        }
+    }
+
+    const cards = doc.querySelectorAll('.product-item, .category-product, .product-list-item, article, li, .swiper-slide');
+    for (const card of cards) {
+        const text = normalizeWhitespace(card.textContent);
+        if (!text) continue;
+        if (!cleanedIds.some(id => text.includes(id))) continue;
+        const link = card.querySelector('a[href*="/sortiment/"], a[href*="/verkkokauppa/"]');
+        if (link && link.href) return link.href;
+    }
+
+    const candidateLinks = Array.from(doc.querySelectorAll('a[href*="/sortiment/"]'))
+        .map(link => link.href)
+        .filter(Boolean)
+        .filter((href, index, list) => list.indexOf(href) === index);
+
+    if (candidateLinks.length === 1) {
+        return candidateLinks[0];
+    }
+
+    return null;
+}
+
+function extractSwedishProductData(doc, fallbackUrl) {
+    const title = normalizeWhitespace((doc.querySelector('.product-info h1, .product-page-wrapper h1, .product-page h1') || {}).textContent || '');
+    const description = normalizeWhitespace((doc.querySelector('.product-info .description .description-wrapper, .product-info .description, .description-wrapper') || {}).textContent || '');
+    const articleNumber = normalizeWhitespace((extractProductNumberFromDoc(doc) || '').toString());
+
+    return {
+        title,
+        description,
+        articleNumber,
+        url: fallbackUrl || ''
+    };
+}
+
+async function resolveSwedishReference(productNumber) {
+    const normalizedNumber = normalizeWhitespace(productNumber);
+    if (!normalizedNumber) throw new Error('Missing product number');
+    if (swedishReferenceCache.has(normalizedNumber)) return swedishReferenceCache.get(normalizedNumber);
+
+    const productCode = getMainProductCode();
+    const productName = normalizeWhitespace(getProductName());
+    const searchBaseUrl = 'https://www.lekolar.se/sok/';
+    const queries = [normalizedNumber, productCode, productName].filter(Boolean);
+    const identifiers = [normalizedNumber, productCode].filter(Boolean);
+
+    let productUrl = '';
+    for (const query of queries) {
+        const searchUrl = (typeof buildLekolarSearchUrl === 'function')
+            ? buildLekolarSearchUrl(searchBaseUrl, query, {})
+            : `${searchBaseUrl}?query=${encodeURIComponent(query)}`;
+        const searchDoc = await fetchHtmlDocument(searchUrl);
+        const fetchedUrl = normalizeWhitespace(searchDoc.__lesFetchedUrl || '');
+        if (fetchedUrl.includes('/sortiment/')) {
+            productUrl = fetchedUrl;
+        } else {
+            productUrl = findSearchResultProductUrl(searchDoc, identifiers);
+        }
+        if (productUrl) break;
+    }
+
+    if (!productUrl) throw new Error('Could not find Swedish product page');
+
+    const productDoc = await fetchHtmlDocument(productUrl);
+    const result = extractSwedishProductData(productDoc, productUrl);
+    if (!result.description) throw new Error('Swedish description was empty');
+
+    swedishReferenceCache.set(normalizedNumber, result);
+    return result;
+}
+
+function renderSwedishReferencePanel(panel, data) {
+    if (!panel) return;
+
+    const status = panel.querySelector('.les-sv-reference-status');
+    const body = panel.querySelector('.les-sv-reference-body');
+    const actions = panel.querySelector('.les-sv-reference-actions');
+
+    if (status) {
+        status.textContent = data.title
+            ? `Matched Swedish page: ${data.title}${data.articleNumber ? ` (${data.articleNumber})` : ''}`
+            : 'Matched Swedish product page.';
+    }
+
+    if (body) {
+        body.hidden = false;
+        body.innerHTML = `
+            <article class="les-sv-reference-column">
+                <h4>Swedish original</h4>
+                <p class="les-sv-reference-text">${escapeHtml(data.description)}</p>
+            </article>
+        `;
+    }
+
+    if (actions) {
+        const targetLang = getInlineTranslationLanguage();
+        const targetLabel = targetLang === 'fi'
+            ? 'Finnish'
+            : targetLang === 'no'
+                ? 'Norwegian'
+                : targetLang === 'da'
+                    ? 'Danish'
+                    : 'English';
+
+        actions.hidden = false;
+        actions.innerHTML = `
+            <button type="button" class="les-sv-reference-translate-btn" data-state="original" data-target-lang="${escapeHtml(targetLang)}" data-original-text="${escapeHtml(data.description)}">
+                Translate in place (${escapeHtml(targetLabel)})
+            </button>
+            <a href="${escapeHtml(data.url)}" target="_blank" rel="noopener noreferrer">Open Swedish page</a>
+        `;
+
+        const translateBtn = actions.querySelector('.les-sv-reference-translate-btn');
+        const textEl = body.querySelector('.les-sv-reference-text');
+        const titleEl = body.querySelector('h4');
+
+        if (translateBtn && textEl && titleEl) {
+            translateBtn.addEventListener('click', async () => {
+                const state = translateBtn.dataset.state || 'original';
+                const originalText = translateBtn.dataset.originalText || data.description;
+                const translatedText = translateBtn.dataset.translatedText || '';
+
+                if (state === 'translated' && originalText) {
+                    textEl.textContent = originalText;
+                    titleEl.textContent = 'Swedish original';
+                    translateBtn.dataset.state = 'original';
+                    translateBtn.textContent = `Translate in place (${targetLabel})`;
+                    return;
+                }
+
+                translateBtn.disabled = true;
+                const oldLabel = translateBtn.textContent;
+                translateBtn.textContent = 'Translating...';
+
+                try {
+                    let nextText = translatedText;
+                    if (!nextText) {
+                        nextText = await requestInlineTranslation(originalText, targetLang);
+                        translateBtn.dataset.translatedText = nextText;
+                    }
+
+                    textEl.textContent = nextText;
+                    titleEl.textContent = `Auto-translated (${targetLabel})`;
+                    translateBtn.dataset.state = 'translated';
+                    translateBtn.textContent = 'Show Swedish original';
+                } catch (error) {
+                    translateBtn.textContent = oldLabel;
+                    status.textContent = `Translation failed: ${(error && error.message) ? error.message : 'unknown_error'}`;
+                } finally {
+                    translateBtn.disabled = false;
+                }
+            });
+        }
+    }
+}
+
+function renderSwedishReferenceError(panel, message) {
+    if (!panel) return;
+    const status = panel.querySelector('.les-sv-reference-status');
+    const body = panel.querySelector('.les-sv-reference-body');
+    const actions = panel.querySelector('.les-sv-reference-actions');
+
+    if (status) status.textContent = message || 'Could not load Swedish reference.';
+    if (body) {
+        body.hidden = true;
+        body.innerHTML = '';
+    }
+    if (actions) {
+        actions.hidden = true;
+        actions.innerHTML = '';
+    }
+}
+
+async function showSwedishReference(productNumber, button) {
+    const panel = ensureSwedishReferencePanel();
+    renderSwedishReferenceError(panel, 'Loading Swedish reference...');
+    updateSwedishReferenceButtonState(button, 'loading');
+
+    try {
+        const data = await resolveSwedishReference(productNumber);
+        renderSwedishReferencePanel(panel, data);
+    } catch (error) {
+        renderSwedishReferenceError(panel, (error && error.message) ? error.message : 'Could not load Swedish reference.');
+    } finally {
+        updateSwedishReferenceButtonState(button, 'idle');
+    }
+}
+
 function applyEnvironmentalLogoVisibility() {
     const shouldHide = Boolean(currentSettings.hideEnvironmentalLogo) && isListPage();
     document.documentElement.classList.toggle('les-hide-environmental-logo', shouldHide);
@@ -568,9 +972,84 @@ function findAndInject() {
         }
     }
 
+    // 3. Inject Swedish reference button (product pages only)
+    if (!isListPage()) {
+        const mainProductNumber = getMainProductNumber();
+        const baseNumber = extractBaseItemNumber(mainProductNumber);
+
+        if (baseNumber) {
+            let btn = document.querySelector('.les-sv-reference-btn');
+            if (!btn) {
+                btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'les-sv-reference-btn';
+                btn.title = 'Show Swedish source text for this product';
+
+                const svgNS = 'http://www.w3.org/2000/svg';
+                const svg = document.createElementNS(svgNS, 'svg');
+                svg.setAttribute('width', '14');
+                svg.setAttribute('height', '14');
+                svg.setAttribute('viewBox', '0 0 24 24');
+                svg.setAttribute('fill', 'none');
+                svg.setAttribute('stroke', 'currentColor');
+                svg.setAttribute('stroke-width', '2');
+                svg.setAttribute('stroke-linecap', 'round');
+                svg.setAttribute('stroke-linejoin', 'round');
+                const globe1 = document.createElementNS(svgNS, 'circle');
+                globe1.setAttribute('cx', '12');
+                globe1.setAttribute('cy', '12');
+                globe1.setAttribute('r', '10');
+                const globe2 = document.createElementNS(svgNS, 'path');
+                globe2.setAttribute('d', 'M2 12h20');
+                const globe3 = document.createElementNS(svgNS, 'path');
+                globe3.setAttribute('d', 'M12 2a15.3 15.3 0 010 20');
+                const globe4 = document.createElementNS(svgNS, 'path');
+                globe4.setAttribute('d', 'M12 2a15.3 15.3 0 000 20');
+                svg.appendChild(globe1);
+                svg.appendChild(globe2);
+                svg.appendChild(globe3);
+                svg.appendChild(globe4);
+
+                const label = document.createElement('span');
+                label.className = 'les-sv-reference-label';
+                label.textContent = 'SV text';
+
+                btn.appendChild(svg);
+                btn.appendChild(label);
+
+                btn.addEventListener('click', async (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+
+                    const currentNumber = btn.dataset.productNumber || '';
+                    const existingPanel = getSwedishReferencePanel();
+                    if (existingPanel && existingPanel.dataset.productNumber === currentNumber) {
+                        existingPanel.remove();
+                        return;
+                    }
+
+                    if (existingPanel) existingPanel.remove();
+                    const panel = ensureSwedishReferencePanel();
+                    panel.dataset.productNumber = currentNumber;
+                    await showSwedishReference(currentNumber, btn);
+                });
+            }
+
+            btn.dataset.productNumber = baseNumber;
+            const buttonsBar = ensureProductActionBar();
+            if (buttonsBar && btn.parentElement !== buttonsBar) {
+                buttonsBar.insertBefore(btn, buttonsBar.firstChild);
+            }
+        } else {
+            cleanupSwedishReferenceUi();
+        }
+    } else {
+        cleanupSwedishReferenceUi();
+    }
+
     const restrictedEnabled = canUseRestrictedFeatures();
 
-    // 3. Inject Compliance Lookup Button (product pages only)
+    // 4. Inject Compliance Lookup Button (product pages only)
     if (restrictedEnabled && !isListPage()) {
         const mainProductNumber = getMainProductNumber();
         const baseNumber = extractBaseItemNumber(mainProductNumber);
@@ -647,7 +1126,7 @@ function findAndInject() {
         if (staleBtn) staleBtn.remove();
     }
 
-    // 4. Inject Spec Search (checkboxes + links on spec rows)
+    // 5. Inject Spec Search (checkboxes + links on spec rows)
     if (restrictedEnabled) {
         injectSpecSearch();
     } else {
@@ -682,22 +1161,22 @@ function getSpecSearchBaseUrl() {
 
 const SPEC_KEYS = [
     // Dimensions (numeric, need checkbox for combined search)
-    { patterns: ['pituus', 'length', 'längd'], filterKey: 'length', type: 'dimension' },
-    { patterns: ['istuinkorkeus', 'seat height', 'sitthöjd'], filterKey: 'seatHeight', type: 'dimension' },
-    { patterns: ['korkeus', 'height', 'höjd'], filterKey: 'height', type: 'dimension' },
-    { patterns: ['istuinleveys', 'seat width', 'sittbredd'], filterKey: 'seatWidth', type: 'dimension' },
-    { patterns: ['leveys', 'width', 'bredd'], filterKey: 'width', type: 'dimension' },
-    { patterns: ['halkaisija', 'diameter'], filterKey: 'diameter', type: 'dimension' },
-    { patterns: ['istuinsyvyys', 'seat depth', 'sittdjup'], filterKey: 'seatDepth', type: 'dimension' },
-    { patterns: ['syvyys', 'depth', 'djup'], filterKey: 'depth', type: 'dimension' },
+    { patterns: ['pituus', 'length', 'lengde', 'längd', 'længde'], filterKey: 'length', type: 'dimension' },
+    { patterns: ['istuinkorkeus', 'seat height', 'sittehøyde', 'sitthöjd', 'siddehøjde', 'sædehøjde'], filterKey: 'seatHeight', type: 'dimension' },
+    { patterns: ['korkeus', 'height', 'høyde', 'höjd', 'højde'], filterKey: 'height', type: 'dimension' },
+    { patterns: ['istuinleveys', 'seat width', 'sittebredde', 'sittbredd', 'siddebredde', 'sædebredde'], filterKey: 'seatWidth', type: 'dimension' },
+    { patterns: ['leveys', 'width', 'bredde', 'bredd'], filterKey: 'width', type: 'dimension' },
+    { patterns: ['halkaisija', 'diameter', 'diameteren'], filterKey: 'diameter', type: 'dimension' },
+    { patterns: ['istuinsyvyys', 'seat depth', 'sittedybde', 'sittdjup', 'siddedybde', 'sædedybde'], filterKey: 'seatDepth', type: 'dimension' },
+    { patterns: ['syvyys', 'depth', 'dybde', 'djup'], filterKey: 'depth', type: 'dimension' },
 
     // Text attributes (link-only, no checkbox needed)
-    { patterns: ['väri', 'color', 'colour', 'färg'], filterKey: 'color', type: 'text' },
-    { patterns: ['materiaali', 'material'], filterKey: 'material', type: 'text' },
+    { patterns: ['väri', 'color', 'colour', 'farge', 'färg', 'farve'], filterKey: 'color', type: 'text' },
+    { patterns: ['materiaali', 'material', 'materiale'], filterKey: 'material', type: 'text' },
     { patterns: ['jalkojen materiaali', 'leg material', 'benmaterial'], filterKey: 'legMaterial', type: 'text' },
-    { patterns: ['ympäristömerkinnät', 'ympäristömerkintä', 'ecolabel', 'miljömärkning'], filterKey: 'ecolabel', type: 'text' },
+    { patterns: ['ympäristömerkinnät', 'ympäristömerkintä', 'ecolabel', 'miljømerking', 'miljömärkning', 'miljømærkning'], filterKey: 'ecolabel', type: 'text' },
     { patterns: ['tuoteperhe', 'product series', 'produktserie'], filterKey: 'series', type: 'text' },
-    { patterns: ['pöytälevyn muoto', 'table top shape', 'bordsskivans form'], filterKey: 'shape', type: 'text' },
+    { patterns: ['pöytälevyn muoto', 'table top shape', 'bordsskivans form', 'bordpladens form'], filterKey: 'shape', type: 'text' },
 ];
 
 function matchSpecKey(labelText) {
@@ -891,21 +1370,8 @@ function injectSpecSearch() {
             }
         });
 
-        let buttonsBar = document.querySelector('.les-buttons-bar');
-        if (!buttonsBar) {
-            buttonsBar = document.createElement('div');
-            buttonsBar.className = 'les-buttons-bar';
-            const complianceBtn = document.querySelector('.lekolar-compliance-btn');
-            if (complianceBtn) {
-                complianceBtn.parentElement.insertBefore(buttonsBar, complianceBtn);
-                buttonsBar.appendChild(complianceBtn);
-            } else {
-                const sidebar = document.querySelector('.product-properties, .product-attributes, .product-details-sidebar, .product-specs');
-                if (sidebar) {
-                    sidebar.appendChild(buttonsBar);
-                }
-            }
-        }
+        const buttonsBar = ensureProductActionBar();
+        if (!buttonsBar) return;
         buttonsBar.insertBefore(btn, buttonsBar.firstChild);
     }
 }

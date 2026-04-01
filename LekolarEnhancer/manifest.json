@@ -14,7 +14,8 @@
     "*://*.lekolar.se/*",
     "*://*.lekolar.no/*",
     "*://*.lekolar.dk/*",
-    "https://lekolarab.sharepoint.com/*"
+    "https://lekolarab.sharepoint.com/*",
+    "https://api.mymemory.translated.net/*"
   ],
   "action": {
     "default_popup": "popup.html",
