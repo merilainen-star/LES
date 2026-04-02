@@ -291,7 +291,7 @@ html.les-theme-black .les-spec-search-btn {
 }
 
 .les-buttons-bar .les-spec-search-btn {
-    height: auto;
+    min-height: 38px;
     padding: 8px 16px;
     font-size: 13px;
     font-weight: 600;
@@ -300,6 +300,8 @@ html.les-theme-black .les-spec-search-btn {
 
 .les-buttons-bar .les-sv-reference-btn {
     flex: 1;
+    min-height: 38px;
+    margin-top: 0;
 }
 
 /* --- Compliance Lookup Button --- */

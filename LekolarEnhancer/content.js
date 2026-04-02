@@ -784,12 +784,21 @@ function renderSwedishReferencePanel(panel, data) {
 
     if (body) {
         body.hidden = false;
-        body.innerHTML = `
-            <article class="les-sv-reference-column">
-                <h4>Swedish original</h4>
-                <p class="les-sv-reference-text">${escapeHtml(data.description)}</p>
-            </article>
-        `;
+        body.replaceChildren();
+
+        const article = document.createElement('article');
+        article.className = 'les-sv-reference-column';
+
+        const heading = document.createElement('h4');
+        heading.textContent = 'Swedish original';
+
+        const text = document.createElement('p');
+        text.className = 'les-sv-reference-text';
+        text.textContent = data.description || '';
+
+        article.appendChild(heading);
+        article.appendChild(text);
+        body.appendChild(article);
     }
 
     if (actions) {
@@ -803,12 +812,24 @@ function renderSwedishReferencePanel(panel, data) {
                     : 'English';
 
         actions.hidden = false;
-        actions.innerHTML = `
-            <button type="button" class="les-sv-reference-translate-btn" data-state="original" data-target-lang="${escapeHtml(targetLang)}" data-original-text="${escapeHtml(data.description)}">
-                Translate in place (${escapeHtml(targetLabel)})
-            </button>
-            <a href="${escapeHtml(data.url)}" target="_blank" rel="noopener noreferrer">Open Swedish page</a>
-        `;
+        actions.replaceChildren();
+
+        const translateButton = document.createElement('button');
+        translateButton.type = 'button';
+        translateButton.className = 'les-sv-reference-translate-btn';
+        translateButton.dataset.state = 'original';
+        translateButton.dataset.targetLang = targetLang;
+        translateButton.dataset.originalText = data.description || '';
+        translateButton.textContent = `Translate in place (${targetLabel})`;
+
+        const link = document.createElement('a');
+        link.href = data.url || '#';
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        link.textContent = 'Open Swedish page';
+
+        actions.appendChild(translateButton);
+        actions.appendChild(link);
 
         const translateBtn = actions.querySelector('.les-sv-reference-translate-btn');
         const textEl = body.querySelector('.les-sv-reference-text');
@@ -1467,12 +1488,32 @@ function extractPriceFromCard(card) {
     }
     
     for (const text of priceTokens) {
-        let cleanText = text.replace(/\s+/g, '').replace(',', '.');
-        const match = cleanText.match(/\d+(\.\d+)?/);
-        if (match) {
-            return parseFloat(match[0]);
-        }
+        const price = parseNordicPrice(text);
+        if (price !== null) return price;
     }
+    return null;
+}
+
+function parseNordicPrice(text) {
+    // Strip whitespace and currency symbols/codes, keeping only digits, commas, periods.
+    let s = text.replace(/\s+/g, '').replace(/€|kr|SEK|NOK|DKK|EUR/gi, '').replace(/[^\d.,]/g, '');
+    if (!s) return null;
+
+    // Period-as-thousands + comma-as-decimal: "39.953,00" or "1.234.567,89" (Denmark)
+    if (/^\d{1,3}(\.\d{3})+,\d+$/.test(s)) {
+        return parseFloat(s.replace(/\./g, '').replace(',', '.'));
+    }
+
+    // Comma-as-decimal, no thousands separator: "76,51" or "3154,00" (Finland, Norway after space removal)
+    if (/^\d+,\d+$/.test(s)) {
+        return parseFloat(s.replace(',', '.'));
+    }
+
+    // Plain integer or period-as-decimal: "3154" or "76.51"
+    if (/^\d+(?:\.\d+)?$/.test(s)) {
+        return parseFloat(s);
+    }
+
     return null;
 }
 
