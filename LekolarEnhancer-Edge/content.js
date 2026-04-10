@@ -3,7 +3,8 @@ let currentSettings = {
     infiniteScroll: true,
     copyButtons: true,
     hideEnvironmentalLogo: false,
-    modifierKey: 'shiftKey'
+    modifierKey: 'shiftKey',
+    secondaryModifierKey: 'altKey'
 };
 console.info('LES content script loaded');
 
@@ -483,10 +484,14 @@ function createCopyButton(textGetter, type, options = {}) {
     button.appendChild(tooltip);
 
     // Shared helper to update tooltip based on modifier key state
-    function updateTooltip(isModifier) {
+    function updateTooltip(e) {
         const tooltip = button.querySelector('.tooltip');
-        if (isModifier) {
+        const isPrimary = currentSettings.modifierKey !== 'none' && e[currentSettings.modifierKey];
+        const isSecondary = !isPrimary && currentSettings.secondaryModifierKey !== 'none' && e[currentSettings.secondaryModifierKey];
+        if (isPrimary) {
             tooltip.innerText = "Copy number + name (Link)";
+        } else if (isSecondary) {
+            tooltip.innerText = "Copy number + name";
         } else {
             tooltip.innerText = `Copy ${type}`;
         }
@@ -495,17 +500,17 @@ function createCopyButton(textGetter, type, options = {}) {
     // Key listeners for when the mouse is stationary over the button
     function onKeyDown(e) {
         if (e.key === 'Shift' || e.key === 'Control' || e.key === 'Alt') {
-            updateTooltip(e[currentSettings.modifierKey]);
+            updateTooltip(e);
         }
     }
     function onKeyUp(e) {
         if (e.key === 'Shift' || e.key === 'Control' || e.key === 'Alt') {
-            updateTooltip(e[currentSettings.modifierKey]);
+            updateTooltip(e);
         }
     }
 
     button.addEventListener('mouseenter', (e) => {
-        updateTooltip(e[currentSettings.modifierKey]);
+        updateTooltip(e);
         document.addEventListener('keydown', onKeyDown);
         document.addEventListener('keyup', onKeyUp);
     });
@@ -516,7 +521,7 @@ function createCopyButton(textGetter, type, options = {}) {
     });
 
     button.addEventListener('mousemove', (e) => {
-        updateTooltip(e[currentSettings.modifierKey]);
+        updateTooltip(e);
     });
 
     button.addEventListener('click', (e) => {
@@ -524,8 +529,10 @@ function createCopyButton(textGetter, type, options = {}) {
         e.stopPropagation();
 
         let textToCopy = getValue();
+        const isPrimary = currentSettings.modifierKey !== 'none' && e[currentSettings.modifierKey];
+        const isSecondary = !isPrimary && currentSettings.secondaryModifierKey !== 'none' && e[currentSettings.secondaryModifierKey];
 
-        if (e[currentSettings.modifierKey]) {
+        if (isPrimary) {
             const context = typeof getCopyContext === 'function' ? (getCopyContext() || {}) : {};
             const name = context.name || getProductName();
             const number = context.number || ((type === 'number' && textToCopy) ? textToCopy : getProductNumber());
@@ -549,6 +556,19 @@ function createCopyButton(textGetter, type, options = {}) {
                     // Fallback for browsers (like some Firefox setups) that don't support ClipboardItem natively
                     navigator.clipboard.writeText(plainText).then(onCopySuccess);
                 }
+                return;
+            }
+        }
+
+        if (isSecondary) {
+            const context = typeof getCopyContext === 'function' ? (getCopyContext() || {}) : {};
+            const name = context.name || getProductName();
+            const number = context.number || ((type === 'number' && textToCopy) ? textToCopy : getProductNumber());
+
+            if (name && number) {
+                navigator.clipboard.writeText(`${number} ${name}`).then(onCopySuccess).catch(err => {
+                    console.error('Failed to copy text: ', err);
+                });
                 return;
             }
         }
@@ -2193,7 +2213,8 @@ async function loadSettingsAndInit() {
             infiniteScroll: true,
             copyButtons: true,
             hideEnvironmentalLogo: false,
-            modifierKey: 'shiftKey'
+            modifierKey: 'shiftKey',
+            secondaryModifierKey: 'altKey'
         });
         currentSettings = items;
     } catch (error) {

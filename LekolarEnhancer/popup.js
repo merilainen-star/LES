@@ -5,6 +5,7 @@ const DEFAULTS = {
     copyButtons: true,
     hideEnvironmentalLogo: false,
     modifierKey: 'shiftKey',
+    secondaryModifierKey: 'altKey',
     countries: {
         fi: { enabled: true, url: 'https://www.lekolar.fi/haku/?query=' },
         se: { enabled: false, url: 'https://www.lekolar.se/sok/?query=' },
@@ -28,6 +29,7 @@ const infiniteScrollEl = document.getElementById('infiniteScroll');
 const copyButtonsEl = document.getElementById('copyButtons');
 const hideEnvironmentalLogoEl = document.getElementById('hideEnvironmentalLogo');
 const modifierKeyEl = document.getElementById('modifierKey');
+const secondaryModifierKeyEl = document.getElementById('secondaryModifierKey');
 const saveIndicator = document.getElementById('saveIndicator');
 const permissionWarningEl = document.getElementById('permissionWarning');
 const recheckEntitlementBtn = document.getElementById('recheckEntitlementBtn');
@@ -56,6 +58,7 @@ function loadSettings() {
         copyButtonsEl.checked = settings.copyButtons;
         hideEnvironmentalLogoEl.checked = settings.hideEnvironmentalLogo;
         modifierKeyEl.value = settings.modifierKey;
+        secondaryModifierKeyEl.value = settings.secondaryModifierKey || DEFAULTS.secondaryModifierKey;
 
         // Find which country is enabled and select its radio
         let activeCode = 'fi'; // Default fallback
@@ -87,6 +90,7 @@ function saveSettings() {
         copyButtons: copyButtonsEl.checked,
         hideEnvironmentalLogo: hideEnvironmentalLogoEl.checked,
         modifierKey: modifierKeyEl.value,
+        secondaryModifierKey: secondaryModifierKeyEl.value,
         countries
     };
 
@@ -279,6 +283,7 @@ infiniteScrollEl.addEventListener('change', saveSettings);
 copyButtonsEl.addEventListener('change', saveSettings);
 hideEnvironmentalLogoEl.addEventListener('change', saveSettings);
 modifierKeyEl.addEventListener('change', saveSettings);
+secondaryModifierKeyEl.addEventListener('change', saveSettings);
 
 COUNTRY_CODES.forEach(code => {
     countryRadios[code].addEventListener('change', saveSettings);
