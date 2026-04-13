@@ -315,19 +315,10 @@ async function fetchRemoteHtml(targetUrl) {
     }
 }
 
-async function translateTextViaMyMemory(text, sourceLang, targetLang) {
-    const normalizedText = String(text || '').trim();
-    if (!normalizedText) {
-        return { ok: false, error: 'empty_text' };
-    }
-
-    const source = String(sourceLang || 'sv').trim().toLowerCase();
-    const target = String(targetLang || 'en').trim().toLowerCase();
-    const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(normalizedText)}&langpair=${encodeURIComponent(source)}|${encodeURIComponent(target)}`;
-
+async function translateChunkViaMyMemory(chunk, source, target) {
+    const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(chunk)}&langpair=${encodeURIComponent(source)}|${encodeURIComponent(target)}`;
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 12000);
-
     try {
         const response = await fetch(url, {
             method: 'GET',
@@ -335,24 +326,17 @@ async function translateTextViaMyMemory(text, sourceLang, targetLang) {
             redirect: 'follow',
             signal: controller.signal
         });
-
         if (!response.ok) {
             return { ok: false, error: `translation_http_${response.status}` };
         }
-
         const payload = await response.json();
         const translatedText = payload && payload.responseData && payload.responseData.translatedText
             ? String(payload.responseData.translatedText).trim()
             : '';
-
         if (!translatedText) {
             return { ok: false, error: 'translation_empty' };
         }
-
-        return {
-            ok: true,
-            translation: translatedText
-        };
+        return { ok: true, translation: translatedText };
     } catch (error) {
         return {
             ok: false,
@@ -361,6 +345,54 @@ async function translateTextViaMyMemory(text, sourceLang, targetLang) {
     } finally {
         clearTimeout(timeoutId);
     }
+}
+
+function splitIntoChunks(text, maxLen) {
+    const chunks = [];
+    let remaining = text;
+    while (remaining.length > maxLen) {
+        // Try to split at sentence boundary (". ") within the limit
+        let splitAt = remaining.lastIndexOf('. ', maxLen);
+        if (splitAt > 0) {
+            splitAt += 1; // include the period
+        } else {
+            // Fall back to last space within limit
+            splitAt = remaining.lastIndexOf(' ', maxLen);
+        }
+        if (splitAt <= 0) {
+            splitAt = maxLen; // Hard cut if no whitespace found
+        }
+        chunks.push(remaining.slice(0, splitAt).trim());
+        remaining = remaining.slice(splitAt).trim();
+    }
+    if (remaining.length > 0) {
+        chunks.push(remaining);
+    }
+    return chunks;
+}
+
+async function translateTextViaMyMemory(text, sourceLang, targetLang) {
+    const normalizedText = String(text || '').trim();
+    if (!normalizedText) {
+        return { ok: false, error: 'empty_text' };
+    }
+
+    const source = String(sourceLang || 'sv').trim().toLowerCase();
+    const target = String(targetLang || 'en').trim().toLowerCase();
+
+    const MAX_CHUNK = 480; // MyMemory limit is 500; stay safely under
+    const chunks = splitIntoChunks(normalizedText, MAX_CHUNK);
+
+    const translatedParts = [];
+    for (const chunk of chunks) {
+        const result = await translateChunkViaMyMemory(chunk, source, target);
+        if (!result.ok) {
+            return result;
+        }
+        translatedParts.push(result.translation);
+    }
+
+    return { ok: true, translation: translatedParts.join(' ') };
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {

@@ -283,6 +283,7 @@ html.les-theme-black .les-spec-search-btn {
     gap: 8px;
     margin-top: 12px;
     width: 100%;
+    align-items: stretch;
 }
 
 .les-buttons-bar .lekolar-compliance-btn {
@@ -290,18 +291,17 @@ html.les-theme-black .les-spec-search-btn {
     flex: 1;
 }
 
-.les-buttons-bar .les-spec-search-btn {
-    min-height: 38px;
-    padding: 8px 16px;
-    font-size: 13px;
-    font-weight: 600;
-    box-sizing: border-box;
-}
-
+.les-buttons-bar .les-spec-search-btn,
 .les-buttons-bar .les-sv-reference-btn {
     flex: 1;
     min-height: 38px;
+    height: auto;
     margin-top: 0;
+    padding: 8px 16px;
+    font-size: 13px;
+    font-weight: 600;
+    justify-content: center;
+    box-sizing: border-box;
 }
 
 /* --- Compliance Lookup Button --- */

@@ -39,4 +39,10 @@ foreach ($relativeFile in $filesToCopy) {
     Copy-Item -LiteralPath $sourceFile -Destination $targetFile -Force
     Write-Host "Synced $relativeFile"
 }
+
+Write-Host "Creating zip package for Edge..."
+$zipPath = Join-Path $repoRoot "edge-extension.zip"
+Compress-Archive -Path "$edgePath\*" -DestinationPath $zipPath -Force
+Write-Host "Created $zipPath"
+
 Write-Host "Edge variant sync complete."
