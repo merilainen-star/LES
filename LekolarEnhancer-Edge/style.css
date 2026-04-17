@@ -111,17 +111,48 @@ html.les-hide-environmental-logo :is(.product-item, .category-product, .product-
 }
 
 /* --- Price Sorting --- */
+
+/* Flex row that holds h1 + sort dropdown on the same line */
+.lekolar-heading-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 0 !important;
+    padding: 0 !important;
+}
+
+.lekolar-heading-row h1 {
+    margin: 0 !important;
+    flex: 1 1 auto;
+}
+
+/* Collapse any gap immediately after the heading row */
+.lekolar-heading-row + * {
+    margin-top: 0 !important;
+    padding-top: 0 !important;
+}
+
+/* Known site culprit: .category-content reserves 240px min-height */
+.category-content {
+    min-height: 0 !important;
+    height: auto !important;
+    padding-bottom: 0 !important;
+}
+
 .lekolar-sort-container {
-    padding: 10px 15px;
-    margin: 10px 0;
-    background: #f8fafc;
-    border: 1px solid #e2e8f0;
-    border-radius: 6px;
     display: inline-flex;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
     font-size: 14px;
     font-weight: 500;
+    flex: 0 0 auto;
+    /* No box styling — blends into the heading row */
+    padding: 0;
+    margin: 0;
+    background: none;
+    border: none;
 }
 
 .lekolar-sort-select {

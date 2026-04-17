@@ -1695,10 +1695,22 @@ function initPriceSorting() {
     const gridContainer = findProductGridInDoc(document);
     if (!gridContainer) return;
 
-    let target = gridContainer.previousElementSibling;
-    if (target && target.className && target.className.includes('header')) {
-        target.appendChild(container);
+    // Place sort container on the SAME ROW as the result-count heading, right-aligned.
+    // We wrap the h1 and sort container in a flex row so they sit side-by-side.
+    const heading = document.querySelector(
+        '.search-result h1, .js-searchResults h1, [class*="search-result"] h1, main h1, #main h1'
+    );
+    if (heading) {
+        // Only create the wrapper once (guard against double-init)
+        if (!heading.parentNode.classList.contains('lekolar-heading-row')) {
+            const row = document.createElement('div');
+            row.className = 'lekolar-heading-row';
+            heading.parentNode.insertBefore(row, heading);
+            row.appendChild(heading);
+            row.appendChild(container);
+        }
     } else {
+        // Fallback: insert before the product grid
         gridContainer.parentNode.insertBefore(container, gridContainer);
     }
     
@@ -2169,40 +2181,91 @@ function compactSearchPage() {
     const isCategory = window.location.pathname.includes('/verkkokauppa/') || window.location.pathname.includes('/sortiment/');
     if (!isSearch && !isCategory) return;
 
-    // Remove the search navigation tabs (Tuotteet, Vinkkejä, Sisältö)
-    const navs = document.querySelectorAll('nav.main-search-nav, nav.js-searchNavigation, .js-searchNavigation');
-    navs.forEach(nav => {
-        nav.style.display = 'none';
-        nav.style.height = '0';
-        nav.style.margin = '0';
-        nav.style.padding = '0';
-        nav.style.overflow = 'hidden';
-    });
+    function doCleanup() {
+        // Remove the search navigation tabs (Tuotteet, Vinkkejä, Sisältö) from DOM entirely.
+        document.querySelectorAll('nav.main-search-nav, nav.js-searchNavigation, .js-searchNavigation')
+            .forEach(el => el.remove());
 
-    // Also hide the parent container (.search-filter-panel) which has display:contents inline
-    const panels = document.querySelectorAll('.search-filter-panel, [class*="search-filter-panel"]');
-    panels.forEach(panel => {
-        panel.style.setProperty('display', 'none', 'important');
-        panel.style.setProperty('height', '0', 'important');
-        panel.style.setProperty('margin', '0', 'important');
-        panel.style.setProperty('padding', '0', 'important');
-    });
+        // Remove the filter panel wrapper (tabs container) from DOM entirely.
+        document.querySelectorAll('.search-filter-panel, [class*="search-filter-panel"]')
+            .forEach(el => el.remove());
 
-    // Also try to find elements by data-content-type="products" parent container
-    const searchResults = document.querySelectorAll('[data-content-type="products"]');
-    searchResults.forEach(el => {
-        // We no longer zero out the margin here for everything
-    });
+        // Collapse any inline margin-top the page added to compensate for the removed tabs.
+        document.querySelectorAll('.search-result, .js-searchResults, [class*="search-result"], [data-content-type="products"]')
+            .forEach(el => {
+                el.style.setProperty('margin-top', '0', 'important');
+                el.style.setProperty('padding-top', '0', 'important');
+            });
 
-    // The search page has a massive inline 10em margin-top because we hid the tabs.
-    // We strictly apply a margin-fix ONLY on search pages, so product pages are untouched.
-    if (isSearch) {
-        const searchResultEls = document.querySelectorAll('.search-result, .js-searchResults');
-        searchResultEls.forEach(el => {
-            el.style.setProperty('margin-top', '20px', 'important'); // 20px clearance below header
+        // Find the result-count h1 and aggressively collapse all ghost space around it.
+        const h1 = document.querySelector(
+            '.search-result h1, .js-searchResults h1, [class*="search-result"] h1, main h1, #main h1'
+        );
+        if (!h1) return;
+
+        // 1. Collapse ALL spacing on h1's direct parent — including any site-set min-height/height
+        const h1Parent = h1.parentNode;
+        h1Parent.style.setProperty('padding-top',    '0',    'important');
+        h1Parent.style.setProperty('padding-bottom', '0',    'important');
+        h1Parent.style.setProperty('margin-top',     '0',    'important');
+        h1Parent.style.setProperty('margin-bottom',  '0',    'important');
+        h1Parent.style.setProperty('min-height',     '0',    'important');
+        h1Parent.style.setProperty('height',         'auto', 'important');
+
+        // Also zero the grandparent in case the heading is nested one level deeper
+        const h1GrandParent = h1Parent.parentNode;
+        if (h1GrandParent && h1GrandParent !== document.body) {
+            h1GrandParent.style.setProperty('padding-bottom', '0',    'important');
+            h1GrandParent.style.setProperty('margin-bottom',  '0',    'important');
+            h1GrandParent.style.setProperty('min-height',     '0',    'important');
+            h1GrandParent.style.setProperty('height',         'auto', 'important');
+        }
+
+        // Known culprit from site diagnostics: .category-content has min-height:240px
+        // which reserves empty space even when content is smaller.
+        document.querySelectorAll('.category-content, [class*="category-content"]').forEach(el => {
+            el.style.setProperty('min-height',     '0',    'important');
+            el.style.setProperty('height',         'auto', 'important');
+            el.style.setProperty('padding-bottom', '0',    'important');
+        });
+
+        // Known culprit from site diagnostics: .product-list-wrapper has ~58px margin-top
+        // set as an inline style, so the CSS sibling selector can't reach it.
+        document.querySelectorAll('.product-list-wrapper, [class*="product-list-wrapper"]').forEach(el => {
+            el.style.setProperty('margin-top',  '0', 'important');
             el.style.setProperty('padding-top', '0', 'important');
         });
+
+        // 2. Remove empty children of h1's parent (ghost wrappers left by removed tabs)
+        Array.from(h1Parent.children).forEach(child => {
+            if (child === h1) return;
+            if (child.classList && child.classList.contains('lekolar-heading-row')) return;
+            const hasText = child.textContent.trim().length > 0;
+            const hasInteractive = child.querySelector('input, select, button');
+            if (!hasText && !hasInteractive) child.remove();
+        });
+
+        // 3. Also scan SIBLINGS of h1's parent — the gap may live at a higher DOM level,
+        //    between the heading container and the filter row.
+        let sibling = h1Parent.nextElementSibling;
+        while (sibling) {
+            const next = sibling.nextElementSibling;
+            const hasText = sibling.textContent.trim().length > 0;
+            const hasInteractive = sibling.querySelector('input, select, button');
+            if (!hasText && !hasInteractive) {
+                sibling.remove();
+            } else {
+                break; // hit real content — stop
+            }
+            sibling = next;
+        }
     }
+
+    // Run immediately, then re-run at short intervals to catch dynamically rendered content
+    // (Lekolar renders parts of the page via JavaScript after DOMContentLoaded).
+    doCleanup();
+    setTimeout(doCleanup, 200);
+    setTimeout(doCleanup, 800);
 }
 
 
