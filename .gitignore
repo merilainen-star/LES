@@ -17,3 +17,6 @@ PimData.json
 
 # Bundled dev tooling (node.exe etc.) — kept locally for scrape-facets.js but not committed
 tools/
+
+# Locally-built Edge extension zip (pre-push hook rebuilds it; CI publishes its own)
+edge-extension.zip
