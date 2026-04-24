@@ -1,8 +1,38 @@
-// background.js — Service worker for omnibox search & default settings
-try {
-    importScripts('searchUtils.js');
-} catch (e) {
-    console.error("Failed to load searchUtils.js", e);
+// background.js — Background logic for omnibox search & default settings.
+// Chrome MV3 runs this as a service worker and loads siblings via importScripts.
+// Firefox runs this as a background page and loads siblings via manifest.scripts.
+if (typeof importScripts === 'function') {
+    try {
+        importScripts(
+            'searchUtils.js',
+            'cryptoVault.js',
+            'facetVocabulary.js',
+            'categoryClassifier.js',
+            'aiPrompt.js',
+            'aiProviders.js'
+        );
+    } catch (e) {
+        console.error("Failed to load background scripts", e);
+    }
+}
+
+const LES_AI_FI_SEARCH_BASE = 'https://www.lekolar.fi/haku/';
+
+function lesAiLookupVocabulary(userText) {
+    const category = lesClassifyCategory(userText);
+    const vocab = LES_FACET_VOCABULARY[category] || LES_FACET_VOCABULARY._default;
+    return { category, vocab };
+}
+
+async function lesAiResolveQueryViaProvider(provider, userText, model) {
+    const apiKey = await lesVaultGetKey(provider);
+    if (!apiKey) throw new Error('missing_api_key');
+    const { category, vocab } = lesAiLookupVocabulary(userText);
+    const systemPrompt = lesAiBuildSystemPrompt(PIM_TO_FACET_MAP, vocab);
+    const raw = await lesAiExtractFacets({ provider, userText, systemPrompt, apiKey, model });
+    const extracted = lesAiValidateExtraction(raw, PIM_TO_FACET_MAP, vocab);
+    extracted.category = category;
+    return extracted;
 }
 
 const DEFAULT_SETTINGS = {
@@ -426,6 +456,54 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 });
             });
 
+        return true;
+    }
+
+    if (message.action === 'lesAiSearch') {
+        (async () => {
+            try {
+                const extracted = await lesAiResolveQueryViaProvider(
+                    message.provider,
+                    message.userText,
+                    message.model
+                );
+                const url = buildLekolarSearchUrl(
+                    LES_AI_FI_SEARCH_BASE,
+                    extracted.query,
+                    extracted.filters
+                );
+                sendResponse({ ok: true, extracted, url });
+            } catch (error) {
+                sendResponse({
+                    ok: false,
+                    error: (error && error.message) ? error.message : String(error)
+                });
+            }
+        })();
+        return true;
+    }
+
+    if (message.action === 'lesAiTestKey') {
+        (async () => {
+            try {
+                const apiKey = await lesVaultGetKey(message.provider);
+                if (!apiKey) {
+                    sendResponse({ ok: false, error: 'missing_api_key' });
+                    return;
+                }
+                const result = await lesAiTestKey({
+                    provider: message.provider,
+                    apiKey,
+                    model: message.model
+                });
+                sendResponse(result);
+            } catch (error) {
+                sendResponse({
+                    ok: false,
+                    error: (error && error.message) ? error.message : String(error)
+                });
+            }
+        })();
         return true;
     }
 

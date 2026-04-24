@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lekolar Enhancer — AI Settings</title>
+  <link rel="stylesheet" href="popup.css">
+  <link rel="stylesheet" href="options.css">
+</head>
+
+<body class="options-body">
+  <div class="options-container">
+    <div class="popup-header">
+      <img src="logo.png" alt="Logo" class="header-logo">
+      <div class="header-text">
+        <h1>AI Search — API Keys</h1>
+        <span class="version">Bring your own key (BYOK)</span>
+      </div>
+    </div>
+
+    <div class="section">
+      <p class="hint">
+        Keys are encrypted with a non-exportable key stored in your browser's keystore
+        and saved in <code>chrome.storage.local</code>. They never leave your machine
+        except when calling the provider you pick.
+      </p>
+      <p class="hint warn-note">
+        ⚠ No browser storage is immune to local malware. Set a low monthly spending
+        cap on each provider account.
+      </p>
+    </div>
+
+    <div class="section provider-block" data-provider="openai">
+      <h2>OpenAI</h2>
+      <p class="hint">Default model: <code>gpt-4o-mini</code>. Get a key at platform.openai.com.</p>
+      <div class="key-row">
+        <input type="password" class="key-input" data-key-input placeholder="sk-..." autocomplete="off">
+        <button class="primary-btn secondary-btn" data-save-btn>Save</button>
+      </div>
+      <div class="key-meta hint" data-key-meta>No key saved.</div>
+      <div class="key-actions">
+        <button class="primary-btn test-btn" data-test-btn>Test key</button>
+        <button class="primary-btn danger-btn" data-clear-btn>Remove</button>
+      </div>
+      <div class="test-result hint" data-test-result></div>
+    </div>
+
+    <div class="section provider-block" data-provider="anthropic">
+      <h2>Anthropic</h2>
+      <p class="hint">Default model: <code>claude-haiku-4-5-20251001</code>. Get a key at console.anthropic.com.</p>
+      <div class="key-row">
+        <input type="password" class="key-input" data-key-input placeholder="sk-ant-..." autocomplete="off">
+        <button class="primary-btn secondary-btn" data-save-btn>Save</button>
+      </div>
+      <div class="key-meta hint" data-key-meta>No key saved.</div>
+      <div class="key-actions">
+        <button class="primary-btn test-btn" data-test-btn>Test key</button>
+        <button class="primary-btn danger-btn" data-clear-btn>Remove</button>
+      </div>
+      <div class="test-result hint" data-test-result></div>
+    </div>
+
+    <div class="section provider-block" data-provider="gemini">
+      <h2>Google Gemini</h2>
+      <p class="hint">Default model: <code>gemini-2.0-flash</code>. Get a key at aistudio.google.com.</p>
+      <div class="key-row">
+        <input type="password" class="key-input" data-key-input placeholder="AIza..." autocomplete="off">
+        <button class="primary-btn secondary-btn" data-save-btn>Save</button>
+      </div>
+      <div class="key-meta hint" data-key-meta>No key saved.</div>
+      <div class="key-actions">
+        <button class="primary-btn test-btn" data-test-btn>Test key</button>
+        <button class="primary-btn danger-btn" data-clear-btn>Remove</button>
+      </div>
+      <div class="test-result hint" data-test-result></div>
+    </div>
+
+    <div class="save-indicator" id="saveIndicator">✓ Saved</div>
+  </div>
+
+  <script src="cryptoVault.js"></script>
+  <script src="options.js"></script>
+</body>
+
+</html>

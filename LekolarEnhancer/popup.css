@@ -309,3 +309,125 @@ body {
 .primary-btn:active {
     transform: scale(0.98);
 }
+
+/* --- AI Search --- */
+.ai-country-row {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 6px;
+}
+
+.country-check.disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.country-check.disabled input {
+    cursor: not-allowed;
+}
+
+.ai-chat-row {
+    display: flex;
+    gap: 6px;
+    margin-top: 8px;
+}
+
+.ai-input {
+    flex: 1;
+    padding: 7px 10px;
+    background: #313244;
+    color: #cdd6f4;
+    border: 1px solid #45475a;
+    border-radius: 6px;
+    font-size: 13px;
+    outline: none;
+    transition: border-color 0.2s;
+    min-width: 0;
+}
+
+.ai-input:focus {
+    border-color: #89b4fa;
+}
+
+.ai-send-btn {
+    flex-shrink: 0;
+    width: 40px;
+    margin-top: 0;
+    padding: 7px 0;
+}
+
+.ai-status {
+    margin-top: 8px;
+    min-height: 14px;
+}
+
+.ai-status.ok { color: #a6e3a1; }
+.ai-status.warn { color: #f9e2af; }
+.ai-status.error { color: #f38ba8; }
+
+.ai-preview {
+    margin-top: 10px;
+    padding: 8px 10px;
+    background: rgba(137, 180, 250, 0.08);
+    border: 1px solid #45475a;
+    border-radius: 6px;
+}
+
+.ai-preview-label {
+    font-size: 11px;
+    color: #6c7086;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-right: 6px;
+}
+
+.ai-preview-query {
+    font-size: 13px;
+    color: #cdd6f4;
+    margin-bottom: 6px;
+}
+
+.ai-preview-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-bottom: 8px;
+}
+
+.ai-chip {
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    background: #313244;
+    color: #f5c2e7;
+    border: 1px solid #45475a;
+}
+
+.ai-preview-actions {
+    display: flex;
+    gap: 6px;
+}
+
+.ai-preview-actions .primary-btn {
+    flex: 1;
+    margin-top: 0;
+}
+
+.link-btn {
+    display: block;
+    width: 100%;
+    margin-top: 10px;
+    padding: 4px;
+    background: transparent;
+    border: none;
+    color: #89b4fa;
+    font-size: 12px;
+    cursor: pointer;
+    text-align: center;
+}
+
+.link-btn:hover {
+    color: #b4befe;
+    text-decoration: underline;
+}

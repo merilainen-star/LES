@@ -1,5 +1,12 @@
 // searchUtils.js - Helper for building Lekolar faceted search URLs
 
+// Lekolar multi-value facet syntax differs by type:
+//   - Numeric facets use ¤-joined values inside a single `facet=` param (renders as a range, e.g. "Pituus (cm): 60 - 80").
+//   - Enum facets use repeated `facet=field:value` params (one per value).
+// See memory/project_lekolar_facet_multivalue.md for the why.
+const NUMERIC_FACET_KEYS = new Set(['length', 'width', 'height', 'depth', 'diameter', 'seatHeight']);
+const LEKOLAR_MULTIVALUE_SEPARATOR = '\u00A4';
+
 const PIM_TO_FACET_MAP = {
     length: 'itemLength_cm',
     width: 'itemWidth_cm',
@@ -20,7 +27,11 @@ const PIM_TO_FACET_MAP = {
     ecolabel: 'prodecolabelling',
     toxicFree: 'toxicfree',
     grade: 'grades',
-    series: 'product_included_in_series'
+    series: 'product_included_in_series',
+    heightAdjustable: 'itemheightadjustable',
+    silent: 'silent',
+    ralColor: 'itemcolorcoderalcvl',
+    ncsColor: 'itemcolorcodencscvl'
 };
 
 /**
@@ -41,22 +52,35 @@ function buildLekolarSearchUrl(baseUrl, query, filters = {}) {
     }
 
     const params = [];
-    
+
+    const normalizeOne = (v) => {
+        if (v === null || v === undefined) return '';
+        const s = String(v).trim();
+        return s ? s.replace(',', '.') : '';
+    };
+
     // Convert friendly filter keys to Lekolar ?facet= format
     for (const [key, value] of Object.entries(filters)) {
-        if (!value) continue;
-        
+        if (value === null || value === undefined || value === '') continue;
+
         let facetField = PIM_TO_FACET_MAP[key];
         if (facetField === null) continue; // Explicitly ignored fields
         if (facetField === undefined) facetField = key; // Fallback
-        
-        // Lekolar explicitly expects dot for decimals in facet values
-        let processedValue = value;
-        if (typeof processedValue === 'string') {
-            processedValue = processedValue.replace(',', '.');
+
+        const rawValues = Array.isArray(value) ? value : [value];
+        const values = rawValues.map(normalizeOne).filter(v => v !== '');
+        if (values.length === 0) continue;
+
+        if (NUMERIC_FACET_KEYS.has(key)) {
+            // Numeric: OR-joined via ¤ inside one facet param (range semantics).
+            const joined = values.join(LEKOLAR_MULTIVALUE_SEPARATOR);
+            params.push(`facet=${encodeURIComponent(facetField + ':' + joined)}`);
+        } else {
+            // Enum: repeated facet= params, one per value.
+            for (const v of values) {
+                params.push(`facet=${encodeURIComponent(facetField + ':' + v)}`);
+            }
         }
-        
-        params.push(`facet=${encodeURIComponent(facetField + ':' + processedValue)}`);
     }
 
     if (params.length > 0) {
@@ -74,8 +98,9 @@ const SEARCH_UTILS_GLOBAL =
         : (typeof self !== 'undefined' ? self : (typeof window !== 'undefined' ? window : null));
 
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { buildLekolarSearchUrl, PIM_TO_FACET_MAP };
+    module.exports = { buildLekolarSearchUrl, PIM_TO_FACET_MAP, NUMERIC_FACET_KEYS };
 } else if (SEARCH_UTILS_GLOBAL) {
     SEARCH_UTILS_GLOBAL.buildLekolarSearchUrl = buildLekolarSearchUrl;
     SEARCH_UTILS_GLOBAL.PIM_TO_FACET_MAP = PIM_TO_FACET_MAP;
+    SEARCH_UTILS_GLOBAL.NUMERIC_FACET_KEYS = NUMERIC_FACET_KEYS;
 }

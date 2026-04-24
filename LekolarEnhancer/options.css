@@ -1,0 +1,102 @@
+/* options.css — extends popup.css for the wider options page */
+
+.options-body {
+    width: auto;
+}
+
+.options-container {
+    width: 560px;
+    max-width: 100%;
+    margin: 0 auto;
+    background: #1e1e2e;
+    min-height: 100vh;
+}
+
+.warn-note {
+    color: #f9e2af;
+}
+
+.provider-block .key-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 6px;
+}
+
+.provider-block .key-input {
+    flex: 1;
+    padding: 7px 10px;
+    background: #313244;
+    color: #cdd6f4;
+    border: 1px solid #45475a;
+    border-radius: 6px;
+    font-size: 12px;
+    font-family: 'Consolas', 'Monaco', monospace;
+    outline: none;
+    transition: border-color 0.2s;
+}
+
+.provider-block .key-input:focus {
+    border-color: #89b4fa;
+}
+
+.provider-block .key-meta {
+    margin-bottom: 8px;
+}
+
+.provider-block .key-meta.present {
+    color: #a6e3a1;
+}
+
+.provider-block .key-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.provider-block .key-actions .primary-btn {
+    flex: 1;
+    margin-top: 0;
+}
+
+.provider-block .test-btn {
+    background: #94e2d5;
+}
+
+.provider-block .test-btn:hover {
+    background: #a6e3dc;
+}
+
+.provider-block .danger-btn {
+    background: #f38ba8;
+}
+
+.provider-block .danger-btn:hover {
+    background: #f5a3b8;
+}
+
+.provider-block .test-result {
+    margin-top: 8px;
+    min-height: 14px;
+}
+
+.provider-block .test-result.ok {
+    color: #a6e3a1;
+}
+
+.provider-block .test-result.error {
+    color: #f38ba8;
+}
+
+.save-indicator {
+    position: sticky;
+    bottom: 0;
+    background: #1e1e2e;
+}
+
+code {
+    background: #313244;
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 11px;
+    color: #f5c2e7;
+}
