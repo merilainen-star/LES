@@ -131,7 +131,6 @@ html.les-hide-environmental-logo :is(.product-item, .category-product, .product-
 }
 
 /* --- Price Sorting --- */
-
 /* Flex row that holds h1 + sort dropdown on the same line */
 .lekolar-heading-row {
     display: flex;
