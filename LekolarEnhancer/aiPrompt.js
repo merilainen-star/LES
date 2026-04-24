@@ -70,12 +70,14 @@ function lesAiBuildSystemPrompt(map, vocabulary) {
         '- Mitat aina senttimetreinä pelkkänä numerona (ei yksikköä). "45 cm" -> "45". "0,5 m" -> "50". "L70" -> length "70". "S60" -> width "60".',
         '- Desimaalit pisteellä: "45,5" -> "45.5".',
         hasVocab
-            ? '- Värit, materiaalit, muodot ja ympäristömerkit VAIN yllä listatuista sallituista arvoista. Jos käyttäjän sana ei ole listalla, kartoita se listan laajempaan arvoon (esim. "teräs" -> "Metalli", "mänty" -> "Puu", "tammi" -> "Puu", "lasikuitu" -> "Muovi", "polypropeeni" -> "Muovi", "ABS" -> "Muovi"). Jos sopivaa arvoa ei löydy, jätä suodatin pois.'
+            ? '- Värit, materiaalit, muodot ja ympäristömerkit VAIN yllä listatuista sallituista arvoista. Jos käyttäjän sana ei ole listalla, kartoita se listan laajempaan arvoon. Yleisiä kartoituksia (mutta käytä VAIN jos kohde-arvo on listalla): "teräs"/"alumiini" → "Metalli". "lasikuitu"/"polypropeeni"/"ABS" → "Muovi". "mänty"/"tammi"/"pyökki" → "Puu" TAI vastaava puulaji (Pyökki/Tammi) jos listalla. "koivuvaneri" → "Vaneri" (EI "Koivu" — Koivu tarkoittaa massiivikoivua). "lastulevy", "MDF", "MDF-levy" → EI VASTINETTA listalla → pudota. "massiivipuu" → "Pyökki" tai "Koivu" jos listalla, muuten pudota. "laminaatti" → sekä "Laminaatti" ETTÄ "Korkeapainelaminaatti" jos molemmat listalla (yhdistä putkilla). Jos sopivaa arvoa ei löydy, jätä suodatin pois.'
             : '- Värit ja materiaalit isolla alkukirjaimella suomeksi.',
         '- MITTA-ALUEET: jos käyttäjä antaa mittavälin (esim. "60-80 cm", "50–70", "välillä 62 ja 90"), palauta numeroarvo muodossa "min-max" (esim. "60-80"). Älä valitse yksittäistä arvoa välistä.',
+        '- YKSIKKÖJÄRKI: huonekalujen mitat senttimetreinä. Jos arvo ylittää ~250 cm (esim. pöydän korkeus "650-850 cm"), kyseessä on lähes varmasti mm-yksikkö jonka kirjoittaja on merkinnyt vahingossa cm:ksi. Muunna silloin mm→cm jakamalla 10:llä (esim. "650-850 cm" → "65-85").',
         '- "noin N" / "alle N" / "yli N" → yksittäinen arvo N (ei aluetta).',
         '- VAIHTOEHDOT enum-kentille: jos käyttäjä sallii useamman värin/materiaalin/muodon (esim. "valkoinen, harmaa tai koivu"), yhdistä ne putki-merkillä: "Valkoinen|Harmaa|Koivu". Jokainen arvo on normalisoitava vocab-listaan. Jos yksikään ei osu vocabiin, jätä kenttä pois.',
-        '- Pöytiin kohdistuva erikoiskäytäntö: "kannen leveys" = length, "kannen syvyys" = width (Lekolarin Swedish-konventio).',
+        '- PÖYTIEN MITAT (Lekolarin Swedish-konventio, TÄRKEÄ): pöytien facet-kentät ovat eri kuin intuitio sanoisi. Pöydillä "kannen leveys" (vaakasuuntainen) → length. "kannen syvyys" (etu-taka) → width. ÄLÄ KÄYTÄ width:iä leveydelle pöydissä, äläkä depth:iä syvyydelle. Esim. "kannen leveys 60-80" → length:"60-80". "syvyys 50-70" → width:"50-70". Ei koskaan depth:iä pöydissä. Muille tuotteille (tuoli, kaappi) leveys=width kuten normaalisti.',
+        '- SALLITUT VAIHTOEHDOT: jos käyttäjä listaa useita hyväksyttäviä arvoja (esim. "lastulevyä, MDF-levyä, koivuvaneria, massiivipuuta tai laminaattia"), yhdistä KAIKKI vocabiin osuvat arvot putkilla. Esim. vocab=[Koivu, Korkeapainelaminaatti, Laminaatti, Vaneri, ...] → material:"Koivu|Korkeapainelaminaatti|Laminaatti|Vaneri". Älä valitse vain 1-2 arvoa kun useampi on sallittu.',
         '- Ohita kuvailevat lauseet joita ei voi suodattaa (esim. "koottavissa ilman rakoa", "reppukoukku", "laatikko", "kallistettava kansi"). Älä lisää niitä filtereihin äläkä queryyn — ne vähentävät hakutuloksia.',
         '- Jos syötettä ei voi tulkita, palauta { "query": "<syöte sellaisenaan>", "filters": {} }.',
         '',
@@ -127,9 +129,11 @@ function lesAiParseNumericRange(value) {
     const loInt = Math.ceil(min);
     const hiInt = Math.floor(max);
     if (hiInt < loInt) return null;
-    // Guardrail: don't emit absurdly long ranges (would bloat the URL). 500 ints
-    // is plenty for any realistic furniture dimension in cm.
-    if (hiInt - loInt > 500) return null;
+    // Guardrail: cap at 150 ints. Real furniture dimensions in cm fit well
+    // inside that. Ranges that would exceed it are almost always a unit bug
+    // (mm mistyped as cm, e.g. "650-850" meant "65-85"). Bloated URLs hit
+    // Lekolar's max request length and return 404 — better to drop.
+    if (hiInt - loInt > 150) return null;
     const out = [];
     for (let i = loInt; i <= hiInt; i++) out.push(String(i));
     return out;
@@ -153,9 +157,16 @@ function lesAiValidateExtraction(raw, map, vocabulary) {
 
             if (isNumeric) {
                 // Numeric facet: support range syntax "min-max" → integer array.
+                // If the string looks like a range (contains an internal dash
+                // between digits) but parsing rejects it (malformed, too wide,
+                // or likely unit bug), drop the filter entirely instead of
+                // sending a garbage single value that matches nothing.
+                const looksLikeRange = /\d\s*[-–]\s*\d/.test(str);
                 const range = lesAiParseNumericRange(str);
                 if (range && range.length > 0) {
                     out.filters[k] = range;
+                } else if (looksLikeRange) {
+                    continue; // malformed / overflow range → drop
                 } else {
                     out.filters[k] = str; // single value, unchanged behavior
                 }
