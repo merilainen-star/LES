@@ -80,6 +80,47 @@
       </div>
     </div>
 
+    <!-- AI Search -->
+    <div class="section">
+      <h2>AI Search (FI)</h2>
+      <p class="hint">Type a free-text query in Finnish. AI picks facets; your key stays local.</p>
+
+      <div class="ai-country-row">
+        <label class="country-check"><input type="radio" name="ai-country" value="fi" checked><span class="flag">🇫🇮</span> FI</label>
+        <label class="country-check disabled"><input type="radio" name="ai-country" value="se" disabled><span class="flag">🇸🇪</span> SE</label>
+        <label class="country-check disabled"><input type="radio" name="ai-country" value="no" disabled><span class="flag">🇳🇴</span> NO</label>
+        <label class="country-check disabled"><input type="radio" name="ai-country" value="dk" disabled><span class="flag">🇩🇰</span> DK</label>
+      </div>
+
+      <div class="select-row" style="margin-top:8px">
+        <select id="aiProvider">
+          <option value="openai">OpenAI</option>
+          <option value="anthropic">Anthropic</option>
+          <option value="gemini">Google Gemini</option>
+        </select>
+      </div>
+
+      <div class="ai-chat-row">
+        <input type="text" id="aiInput" class="ai-input" placeholder="esim. musta muovituoli istuinkorkeus 45cm">
+        <button id="aiSendBtn" class="primary-btn ai-send-btn">→</button>
+      </div>
+
+      <div class="ai-status hint" id="aiStatus"></div>
+      <div class="ai-preview hidden" id="aiPreview">
+        <div class="ai-preview-query">
+          <span class="ai-preview-label">Query:</span>
+          <span id="aiPreviewQuery"></span>
+        </div>
+        <div class="ai-preview-chips" id="aiPreviewChips"></div>
+        <div class="ai-preview-actions">
+          <button id="aiOpenBtn" class="primary-btn">Open search</button>
+          <button id="aiCancelBtn" class="primary-btn secondary-btn">Cancel</button>
+        </div>
+      </div>
+
+      <button id="openOptionsBtn" class="link-btn">⚙ Configure API keys →</button>
+    </div>
+
     <!-- Country Search Config -->
     <div class="section">
       <h2>Omnibox Search</h2>

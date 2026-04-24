@@ -3,6 +3,7 @@
 // Lekolar multi-value facet syntax differs by type:
 //   - Numeric facets use ¤-joined values inside a single `facet=` param (renders as a range, e.g. "Pituus (cm): 60 - 80").
 //   - Enum facets use repeated `facet=field:value` params (one per value).
+// See memory/project_lekolar_facet_multivalue.md for the why.
 const NUMERIC_FACET_KEYS = new Set(['length', 'width', 'height', 'depth', 'diameter', 'seatHeight']);
 const LEKOLAR_MULTIVALUE_SEPARATOR = '\u00A4';
 
@@ -26,7 +27,11 @@ const PIM_TO_FACET_MAP = {
     ecolabel: 'prodecolabelling',
     toxicFree: 'toxicfree',
     grade: 'grades',
-    series: 'product_included_in_series'
+    series: 'product_included_in_series',
+    heightAdjustable: 'itemheightadjustable',
+    silent: 'silent',
+    ralColor: 'itemcolorcoderalcvl',
+    ncsColor: 'itemcolorcodencscvl'
 };
 
 /**
@@ -67,9 +72,11 @@ function buildLekolarSearchUrl(baseUrl, query, filters = {}) {
         if (values.length === 0) continue;
 
         if (NUMERIC_FACET_KEYS.has(key)) {
+            // Numeric: OR-joined via ¤ inside one facet param (range semantics).
             const joined = values.join(LEKOLAR_MULTIVALUE_SEPARATOR);
             params.push(`facet=${encodeURIComponent(facetField + ':' + joined)}`);
         } else {
+            // Enum: repeated facet= params, one per value.
             for (const v of values) {
                 params.push(`facet=${encodeURIComponent(facetField + ':' + v)}`);
             }

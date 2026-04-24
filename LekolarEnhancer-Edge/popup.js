@@ -278,6 +278,126 @@ async function recheckEntitlementNow() {
     recheckEntitlementBtn.textContent = 'Re-check SharePoint Access';
 }
 
+// --- AI Search ---
+const AI_PROVIDER_STORAGE_KEY = 'lesAiProvider';
+const aiProviderEl = document.getElementById('aiProvider');
+const aiInputEl = document.getElementById('aiInput');
+const aiSendBtn = document.getElementById('aiSendBtn');
+const aiStatusEl = document.getElementById('aiStatus');
+const aiPreviewEl = document.getElementById('aiPreview');
+const aiPreviewQueryEl = document.getElementById('aiPreviewQuery');
+const aiPreviewChipsEl = document.getElementById('aiPreviewChips');
+const aiOpenBtn = document.getElementById('aiOpenBtn');
+const aiCancelBtn = document.getElementById('aiCancelBtn');
+const openOptionsBtn = document.getElementById('openOptionsBtn');
+
+let aiPendingUrl = '';
+
+function setAiStatus(text, tone) {
+    if (!aiStatusEl) return;
+    aiStatusEl.textContent = text || '';
+    aiStatusEl.classList.remove('ok', 'warn', 'error');
+    if (tone) aiStatusEl.classList.add(tone);
+}
+
+function renderAiPreview(extracted, url) {
+    aiPendingUrl = url || '';
+    const cat = extracted.category && extracted.category !== '_default' ? ` [${extracted.category}]` : '';
+    aiPreviewQueryEl.textContent = (extracted.query || '(no query)') + cat;
+    aiPreviewChipsEl.innerHTML = '';
+    const entries = Object.entries(extracted.filters || {});
+    if (entries.length === 0) {
+        const chip = document.createElement('span');
+        chip.className = 'ai-chip';
+        chip.textContent = 'no filters';
+        aiPreviewChipsEl.appendChild(chip);
+    } else {
+        entries.forEach(([k, v]) => {
+            const chip = document.createElement('span');
+            chip.className = 'ai-chip';
+            chip.textContent = `${k}: ${v}`;
+            aiPreviewChipsEl.appendChild(chip);
+        });
+    }
+    aiPreviewEl.classList.remove('hidden');
+}
+
+function hideAiPreview() {
+    aiPendingUrl = '';
+    aiPreviewEl.classList.add('hidden');
+}
+
+function sendAiSearch() {
+    const userText = (aiInputEl.value || '').trim();
+    if (!userText) return;
+    const provider = aiProviderEl.value;
+
+    hideAiPreview();
+    setAiStatus('Thinking…', 'warn');
+    aiSendBtn.disabled = true;
+
+    chrome.runtime.sendMessage({ action: 'lesAiSearch', provider, userText }, (response) => {
+        aiSendBtn.disabled = false;
+        if (chrome.runtime.lastError) {
+            setAiStatus(`Error: ${chrome.runtime.lastError.message}`, 'error');
+            return;
+        }
+        if (!response || !response.ok) {
+            const err = (response && response.error) || 'unknown_error';
+            if (err === 'missing_api_key') {
+                setAiStatus('No API key for this provider. Open settings.', 'error');
+            } else {
+                setAiStatus(`Error: ${err}`, 'error');
+            }
+            return;
+        }
+        setAiStatus('Review and open:', 'ok');
+        renderAiPreview(response.extracted, response.url);
+    });
+}
+
+function loadAiProvider() {
+    chrome.storage.local.get(AI_PROVIDER_STORAGE_KEY, (data) => {
+        const saved = data[AI_PROVIDER_STORAGE_KEY];
+        if (saved && ['openai', 'anthropic', 'gemini'].includes(saved)) {
+            aiProviderEl.value = saved;
+        }
+    });
+}
+
+function saveAiProvider() {
+    chrome.storage.local.set({ [AI_PROVIDER_STORAGE_KEY]: aiProviderEl.value });
+}
+
+aiProviderEl.addEventListener('change', saveAiProvider);
+
+aiSendBtn.addEventListener('click', sendAiSearch);
+aiInputEl.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+        e.preventDefault();
+        sendAiSearch();
+    }
+});
+
+aiOpenBtn.addEventListener('click', () => {
+    if (!aiPendingUrl) return;
+    chrome.tabs.create({ url: aiPendingUrl });
+});
+aiCancelBtn.addEventListener('click', () => {
+    hideAiPreview();
+    setAiStatus('', '');
+});
+
+openOptionsBtn.addEventListener('click', () => {
+    if (chrome.runtime.openOptionsPage) {
+        chrome.runtime.openOptionsPage();
+    } else {
+        chrome.tabs.create({ url: chrome.runtime.getURL('options.html') });
+    }
+});
+
+loadAiProvider();
+
 // Auto-save on change
 infiniteScrollEl.addEventListener('change', saveSettings);
 copyButtonsEl.addEventListener('change', saveSettings);
