@@ -2,6 +2,54 @@
 
 Scripts that are NOT shipped with the extension. They live outside `LekolarEnhancer/` so they don't get bundled into the browser package.
 
+## Legacy Discovery Workflow
+
+`legacy-discovery.js` implements a 3-step AI-assisted process for surfacing product improvements hidden in the existing codebase:
+
+1. **Ingest** — bundles key source files into an AI-readable context
+2. **Interview** — an AI acts as a Forensic Product Manager, asking 10 focused questions per round to uncover friction points, hidden patterns, and market gaps
+3. **Synthesise** — the AI cross-references your answers with the code to produce prioritised, architecture-aware improvement ideas
+
+The output is printed to stdout and also saved to `tools/legacy-discovery-report.md`.
+
+### Requirements
+
+Node 18+ (for built-in `fetch`). No npm dependencies.
+
+### Run
+
+Set your API key for the chosen provider, then run from the repo root:
+
+```
+# OpenAI (default)
+OPENAI_API_KEY=sk-... node tools/legacy-discovery.js
+
+# Anthropic
+ANTHROPIC_API_KEY=sk-ant-... node tools/legacy-discovery.js --provider anthropic
+
+# Google Gemini
+GEMINI_API_KEY=... node tools/legacy-discovery.js --provider gemini
+```
+
+If `node` isn't on your PATH, use the bundled binary:
+
+```
+OPENAI_API_KEY=sk-... .\tools\node.exe tools/legacy-discovery.js
+```
+
+### Options
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--provider <name>` | `openai` | AI provider: `openai`, `anthropic`, or `gemini` |
+| `--rounds <n>` | `1` | Number of interview rounds before synthesis (1 = 10 Qs + synthesis, 2 = 20 Qs + synthesis) |
+
+### How the interview works
+
+After ingestion the AI asks 10 numbered questions. Type your answers freely — the AI reads the whole block. When you are done, type `---` on its own line and press Enter to move on. After all rounds the AI produces a ranked list of "unthought-of" improvement ideas referencing the actual files and functions it found in the code.
+
+---
+
 ## Facet scraper
 
 Crawls the Lekolar category landing pages and rewrites `LekolarEnhancer/facetVocabulary.js` with the real facet keys and values currently in Lekolar's indexer. This file is what the AI prompt uses to force the model to pick canonical values ("Laminaatti", "Metalli", "Koivu" …) instead of inventing close-but-wrong synonyms ("Korkeapainelaminaatti", "Teräs", "Mänty").
