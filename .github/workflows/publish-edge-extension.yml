@@ -10,23 +10,20 @@ on:
       - 'VERSIONING.md'
 
 jobs:
-  # ── 1. Bump versions and commit back ──────────────────────────────────────
-  bump-versions:
-    name: Bump manifest versions
+  # ── 1. Detect changed targets and read release version ────────────────────
+  prepare-release:
+    name: Prepare release metadata
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     outputs:
       firefox_changed: ${{ steps.detect.outputs.firefox_changed }}
       edge_changed: ${{ steps.detect.outputs.edge_changed }}
-      new_version: ${{ steps.bump.outputs.new_version }}
+      release_version: ${{ steps.version.outputs.release_version }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Detect which folders changed
         id: detect
@@ -41,56 +38,29 @@ jobs:
           # Treat changes in either Firefox or Edge source as a signal to publish Edge
           echo "edge_changed=$(echo "$CHANGED" | grep -Eq '^(LekolarEnhancer/|LekolarEnhancer-Edge/)' && echo true || echo false)" >> $GITHUB_OUTPUT
 
-      - name: Bump patch version in both manifests
-        id: bump
+      - name: Read release version from manifest
+        id: version
         run: |
-          # Read version from Firefox manifest (source of truth)
-          CURRENT=$(python3 -c "import json; print(json.load(open('LekolarEnhancer/manifest.json'))['version'])")
-          echo "Current version: $CURRENT"
-
-          IFS='.' read -ra PARTS <<< "$CURRENT"
-          PARTS[-1]=$((${PARTS[-1]} + 1))
-          NEW=$(IFS='.'; echo "${PARTS[*]}")
-          echo "New version: $NEW"
-          echo "new_version=$NEW" >> $GITHUB_OUTPUT
-
-          # Update Firefox manifest
-          python3 - <<EOF
-          import json
-          for path in ['LekolarEnhancer/manifest.json', 'LekolarEnhancer-Edge/manifest.json']:
-              with open(path, 'r') as f:
-                  data = json.load(f)
-              data['version'] = '$NEW'
-              with open(path, 'w') as f:
-                  json.dump(data, f, indent=2, ensure_ascii=False)
-                  f.write('\n')
-          EOF
+          RELEASE_VERSION=$(python3 -c "import json; print(json.load(open('LekolarEnhancer/manifest.json'))['version'])")
+          echo "Release version: $RELEASE_VERSION"
+          echo "release_version=$RELEASE_VERSION" >> $GITHUB_OUTPUT
 
       - name: Sync Edge variant from Firefox source
         shell: pwsh
         run: ./sync-edge-variant.ps1
 
-      - name: Commit and push version bump
-        run: |
-          git config user.name  "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add LekolarEnhancer/manifest.json LekolarEnhancer-Edge/
-          git diff --cached --quiet && echo "No changes to commit" || \
-            git commit -m "chore: bump extension version to ${{ steps.bump.outputs.new_version }} [skip ci]"
-          git push
-
   # ── 2a. Publish to Firefox AMO ─────────────────────────────────────────────
   publish-firefox:
     name: Publish to Firefox AMO
-    needs: bump-versions
-    if: needs.bump-versions.outputs.firefox_changed == 'true'
+    needs: prepare-release
+    if: needs.prepare-release.outputs.firefox_changed == 'true'
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout (after version bump commit)
+      - name: Checkout release commit
         uses: actions/checkout@v4
         with:
-          ref: main
+          ref: ${{ github.sha }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -113,18 +83,18 @@ jobs:
   # ── 2b. Publish to Edge Add-ons ───────────────────────────────────────────
   publish-edge:
     name: Publish to Edge Add-ons
-    needs: bump-versions
-    if: needs.bump-versions.outputs.edge_changed == 'true'
+    needs: prepare-release
+    if: needs.prepare-release.outputs.edge_changed == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
         shell: bash
 
     steps:
-      - name: Checkout (after version bump commit)
+      - name: Checkout release commit
         uses: actions/checkout@v4
         with:
-          ref: main
+          ref: ${{ github.sha }}
 
       - name: Create extension ZIP
         run: |
@@ -335,7 +305,7 @@ jobs:
 
             if [[ "$status" == "Succeeded" ]]; then
               rm -f "$publish_poll_body"
-              echo "Edge extension v${{ needs.bump-versions.outputs.new_version }} published successfully."
+              echo "Edge extension v${{ needs.prepare-release.outputs.release_version }} published successfully."
               exit 0
             fi
 
