@@ -124,6 +124,154 @@ article:hover .lekolar-hover-copy {
     pointer-events: auto;
 }
 
+/* Product-name similar search */
+.les-product-name-search-host {
+    position: relative;
+}
+
+.les-product-name-actions {
+    display: inline-flex;
+    align-items: center;
+    margin-right: 10px;
+    vertical-align: middle;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.10);
+}
+
+.les-product-name-actions .lekolar-copy-btn {
+    width: 34px;
+    height: 34px;
+    padding: 0;
+    margin-left: 0;
+    color: #333;
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 5px 0 0 5px;
+    box-shadow: none;
+}
+
+.les-product-name-actions .lekolar-copy-btn + .lekolar-copy-btn {
+    border-left: 0;
+}
+
+.les-product-name-actions .lekolar-copy-btn:last-child {
+    border-radius: 0 5px 5px 0;
+}
+
+.les-product-name-actions .lekolar-copy-btn:hover {
+    background-color: #f8fafc;
+}
+
+.les-product-name-search-btn:hover,
+.les-product-name-search-btn.is-active {
+    background-color: #f8fafc;
+    color: #333;
+    opacity: 1;
+}
+
+.les-product-name-search-btn.is-active {
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.18);
+}
+
+.les-product-name-search-text {
+    display: inline;
+}
+
+.les-name-search-word,
+.les-name-search-space {
+    white-space: pre-wrap;
+}
+
+.les-product-name-search-active .les-name-search-word {
+    border-radius: 3px;
+    cursor: pointer;
+    text-decoration: underline;
+    text-decoration-style: dotted;
+    text-underline-offset: 3px;
+    transition: background-color 0.14s ease, color 0.14s ease, text-decoration-color 0.14s ease;
+}
+
+.les-product-name-search-active .les-name-search-word.is-selected {
+    background-color: rgba(37, 99, 235, 0.11);
+    color: #111827;
+    text-decoration-style: solid;
+    text-decoration-color: rgba(37, 99, 235, 0.65);
+}
+
+.les-product-name-search-active .les-name-search-word.is-muted {
+    color: #cbd5e1;
+    text-decoration-color: transparent;
+}
+
+.les-product-name-search-active .les-name-search-word:hover {
+    background-color: rgba(37, 99, 235, 0.17);
+}
+
+.les-card-name-search-btn {
+    width: 28px;
+    height: 28px;
+    padding: 4px;
+    margin-left: 6px;
+    color: #64748b;
+    vertical-align: text-bottom;
+}
+
+.les-card-name-search-btn:hover,
+.les-card-name-search-btn.is-active {
+    background-color: #f0f0f0;
+    color: #333;
+}
+
+.les-card-name-search-btn.is-active {
+    opacity: 1;
+    pointer-events: auto;
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.16);
+}
+
+html.les-theme-dark .les-product-name-search-btn,
+html.les-theme-black .les-product-name-search-btn,
+html.les-theme-dark .les-card-name-search-btn,
+html.les-theme-black .les-card-name-search-btn {
+    color: #94a3b8;
+}
+
+html.les-theme-dark .les-product-name-actions .lekolar-copy-btn,
+html.les-theme-black .les-product-name-actions .lekolar-copy-btn {
+    background: #1e293b;
+    border-color: #334155;
+    color: #e2e8f0;
+}
+
+html.les-theme-dark .les-product-name-search-btn:hover,
+html.les-theme-dark .les-product-name-search-btn.is-active,
+html.les-theme-black .les-product-name-search-btn:hover,
+html.les-theme-black .les-product-name-search-btn.is-active,
+html.les-theme-dark .les-card-name-search-btn:hover,
+html.les-theme-dark .les-card-name-search-btn.is-active,
+html.les-theme-black .les-card-name-search-btn:hover,
+html.les-theme-black .les-card-name-search-btn.is-active {
+    background-color: #334155;
+    color: #bfdbfe;
+}
+
+html.les-theme-dark .les-product-name-search-active .les-name-search-word.is-selected,
+html.les-theme-black .les-product-name-search-active .les-name-search-word.is-selected {
+    background-color: rgba(96, 165, 250, 0.18);
+    color: #f8fafc;
+}
+
+html.les-theme-dark .les-product-name-search-active .les-name-search-word.is-muted,
+html.les-theme-black .les-product-name-search-active .les-name-search-word.is-muted {
+    color: #64748b;
+}
+
+@media (max-width: 720px) {
+    .les-product-name-actions {
+        margin-right: 6px;
+        transform: translateY(-1px);
+    }
+}
+
 /* Hide product flags (environmental labels, campaigns, discounts, etc.). */
 html.les-hide-environmental-logo :is(.product-item, .category-product, .product-list-item, article)
   :is(.product-flags, .product-flag, [class*="product-flag"], [class*="product-flags"]) {

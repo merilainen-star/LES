@@ -20,6 +20,7 @@ let restrictedFeatureAccess = {
 };
 let entitlementCheckInFlight = null;
 const swedishReferenceCache = new Map();
+let activeProductNameSearchState = null;
 
 function storageSyncGet(defaults) {
     return new Promise((resolve) => chrome.storage.sync.get(defaults, resolve));
@@ -353,10 +354,329 @@ function getMainProductNumber() {
     return getProductNumber();
 }
 
+function getProductNameElement() {
+    // Only target the main product h1 by looking inside product page wrappers.
+    return document.querySelector('.product-info h1, .product-page-wrapper h1, .product-page h1');
+}
+
+function getProductNameFromElement(h1) {
+    if (!h1) return null;
+
+    const clone = h1.cloneNode(true);
+    clone.querySelectorAll('.lekolar-copy-btn, .les-product-name-search-btn').forEach(el => el.remove());
+
+    const text = normalizeWhitespace(clone.textContent || '');
+    return text || normalizeWhitespace(h1.dataset.lesProductName || '') || null;
+}
+
 function getProductName() {
-    // Only target the main product h1 by looking inside product page wrappers
-    const h1 = document.querySelector('.product-info h1, .product-page-wrapper h1, .product-page h1');
-    return h1 ? h1.innerText.trim() : null;
+    return getProductNameFromElement(getProductNameElement());
+}
+
+function createSearchSvg(size = 16) {
+    const svgNS = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(svgNS, 'svg');
+    svg.setAttribute('xmlns', svgNS);
+    svg.setAttribute('width', String(size));
+    svg.setAttribute('height', String(size));
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('fill', 'none');
+    svg.setAttribute('stroke', 'currentColor');
+    svg.setAttribute('stroke-width', '2');
+    svg.setAttribute('stroke-linecap', 'round');
+    svg.setAttribute('stroke-linejoin', 'round');
+
+    const circle = document.createElementNS(svgNS, 'circle');
+    circle.setAttribute('cx', '11');
+    circle.setAttribute('cy', '11');
+    circle.setAttribute('r', '8');
+
+    const line = document.createElementNS(svgNS, 'line');
+    line.setAttribute('x1', '21');
+    line.setAttribute('y1', '21');
+    line.setAttribute('x2', '16.65');
+    line.setAttribute('y2', '16.65');
+
+    svg.appendChild(circle);
+    svg.appendChild(line);
+    return svg;
+}
+
+function getProductNameSearchBaseUrl() {
+    const path = window.location.pathname.toLowerCase();
+    if (path.includes('/sog/')) return window.location.origin + '/sog/';
+    if (path.includes('/sok/')) return window.location.origin + '/sok/';
+    if (path.includes('/haku/')) return window.location.origin + '/haku/';
+
+    const host = window.location.hostname.toLowerCase();
+    if (host.endsWith('.lekolar.dk')) return window.location.origin + '/sog/';
+    if (host.endsWith('.lekolar.se') || host.endsWith('.lekolar.no')) return window.location.origin + '/sok/';
+    return window.location.origin + '/haku/';
+}
+
+function buildProductNameSearchUrl(query) {
+    const baseUrl = getProductNameSearchBaseUrl();
+    if (typeof buildSpecSearchUrl === 'function') {
+        return buildSpecSearchUrl(baseUrl, query, {});
+    }
+
+    const separator = baseUrl.includes('?') ? '&' : '?';
+    return `${baseUrl}${separator}query=${encodeURIComponent(query)}`;
+}
+
+function normalizeProductNameSearchPhrase(value) {
+    return normalizeWhitespace(value)
+        .replace(/\s+([,.;:])/g, '$1')
+        .replace(/[,.;:]+$/g, '')
+        .trim();
+}
+
+function tokenizeProductName(name) {
+    const tokens = [];
+    const re = /(\s+|[^\s]+)/g;
+    let match;
+    let wordIndex = 0;
+
+    while ((match = re.exec(name)) !== null) {
+        const text = match[0];
+        if (/^\s+$/.test(text)) {
+            tokens.push({ type: 'space', text });
+        } else {
+            tokens.push({ type: 'word', text, wordIndex });
+            wordIndex += 1;
+        }
+    }
+
+    return tokens;
+}
+
+function getProductNamePrefix(tokens, targetWordIndex) {
+    let text = '';
+
+    for (const token of tokens) {
+        if (token.type === 'word' && token.wordIndex > targetWordIndex) break;
+        text += token.text;
+    }
+
+    return normalizeProductNameSearchPhrase(text);
+}
+
+function setProductNameSearchPreview(state, wordIndex) {
+    if (!state || !state.wrapper) return;
+
+    const hasPreview = Number.isInteger(wordIndex);
+    state.wrapper.querySelectorAll('.les-name-search-word').forEach(span => {
+        const index = Number(span.dataset.wordIndex);
+        span.classList.toggle('is-selected', hasPreview && index <= wordIndex);
+        span.classList.toggle('is-muted', hasPreview && index > wordIndex);
+    });
+
+    const tooltip = state.button ? state.button.querySelector('.tooltip') : null;
+    if (!hasPreview) {
+        if (state.button) state.button.title = 'Find similar products from name';
+        if (tooltip) tooltip.textContent = state.activeTooltip;
+        return;
+    }
+
+    const query = getProductNamePrefix(state.tokens, wordIndex);
+    if (state.button) state.button.title = query ? `Search: ${query}` : 'Find similar products from name';
+    if (tooltip) tooltip.textContent = query ? `Search: ${query}` : state.activeTooltip;
+}
+
+function openProductNameSearch(query) {
+    const normalizedQuery = normalizeProductNameSearchPhrase(query);
+    if (!normalizedQuery) return;
+
+    const searchUrl = buildProductNameSearchUrl(normalizedQuery);
+    window.open(searchUrl, '_blank', 'noopener,noreferrer');
+}
+
+function renderProductNameSearchText(h1, name) {
+    const tokens = tokenizeProductName(name);
+    const wrapper = document.createElement('span');
+    wrapper.className = 'les-product-name-search-text';
+
+    tokens.forEach(token => {
+        const span = document.createElement('span');
+        span.textContent = token.text;
+
+        if (token.type === 'word') {
+            span.className = 'les-name-search-word';
+            span.dataset.wordIndex = String(token.wordIndex);
+            span.addEventListener('mouseenter', () => {
+                if (!activeProductNameSearchState || activeProductNameSearchState.h1 !== h1) return;
+                setProductNameSearchPreview(activeProductNameSearchState, token.wordIndex);
+            });
+            span.addEventListener('click', (e) => {
+                if (!activeProductNameSearchState || activeProductNameSearchState.h1 !== h1) return;
+                e.preventDefault();
+                e.stopPropagation();
+
+                const query = getProductNamePrefix(activeProductNameSearchState.tokens, token.wordIndex);
+                openProductNameSearch(query);
+                deactivateProductNameSearch();
+            });
+        } else {
+            span.className = 'les-name-search-space';
+        }
+
+        wrapper.appendChild(span);
+    });
+
+    wrapper.addEventListener('mouseleave', () => {
+        if (!activeProductNameSearchState || activeProductNameSearchState.h1 !== h1) return;
+        setProductNameSearchPreview(activeProductNameSearchState, null);
+    });
+
+    Array.from(h1.childNodes).forEach(node => {
+        if (node.nodeType === Node.TEXT_NODE) {
+            node.remove();
+            return;
+        }
+
+        if (node.nodeType !== Node.ELEMENT_NODE) return;
+        if (
+            node.classList.contains('lekolar-copy-btn') ||
+            node.classList.contains('les-product-name-search-btn') ||
+            node.classList.contains('les-product-name-actions')
+        ) return;
+        node.remove();
+    });
+
+    const controlGroup = h1.querySelector('.les-product-name-actions');
+    if (controlGroup) {
+        h1.insertBefore(wrapper, controlGroup.nextSibling);
+    } else {
+        h1.insertBefore(wrapper, h1.firstChild);
+    }
+
+    return { tokens, wrapper };
+}
+
+function deactivateProductNameSearch() {
+    const state = activeProductNameSearchState;
+    if (!state) return;
+
+    setProductNameSearchPreview(state, null);
+    state.h1.classList.remove('les-product-name-search-active');
+    state.button.classList.remove('is-active');
+    state.button.setAttribute('aria-pressed', 'false');
+
+    const tooltip = state.button.querySelector('.tooltip');
+    if (tooltip) tooltip.textContent = state.idleTooltip;
+    state.button.title = 'Find similar products from name';
+
+    document.removeEventListener('keydown', state.onKeyDown, true);
+    document.removeEventListener('click', state.onDocumentClick, true);
+    activeProductNameSearchState = null;
+}
+
+function activateProductNameSearch(h1, button) {
+    const name = getProductNameFromElement(h1);
+    if (!name) return;
+
+    if (activeProductNameSearchState && activeProductNameSearchState.h1 === h1) {
+        deactivateProductNameSearch();
+        return;
+    }
+
+    deactivateProductNameSearch();
+    h1.dataset.lesProductName = name;
+
+    const rendered = renderProductNameSearchText(h1, name);
+    const state = {
+        h1,
+        button,
+        name,
+        tokens: rendered.tokens,
+        wrapper: rendered.wrapper,
+        idleTooltip: 'Find similar products',
+        activeTooltip: 'Choose words to search',
+        onKeyDown: null,
+        onDocumentClick: null
+    };
+
+    state.onKeyDown = (e) => {
+        if (e.key === 'Escape') deactivateProductNameSearch();
+    };
+
+    state.onDocumentClick = (e) => {
+        if (h1.contains(e.target) || button.contains(e.target)) return;
+        deactivateProductNameSearch();
+    };
+
+    activeProductNameSearchState = state;
+    h1.classList.add('les-product-name-search-active');
+    button.classList.add('is-active');
+    button.setAttribute('aria-pressed', 'true');
+    button.title = 'Choose words to search';
+
+    const tooltip = button.querySelector('.tooltip');
+    if (tooltip) tooltip.textContent = state.activeTooltip;
+
+    document.addEventListener('keydown', state.onKeyDown, true);
+    document.addEventListener('click', state.onDocumentClick, true);
+}
+
+function ensureProductNameSearchControl(h1) {
+    if (!h1 || isListPage()) return;
+
+    const name = getProductNameFromElement(h1);
+    if (!name) return;
+
+    h1.dataset.lesProductName = name;
+    h1.classList.add('les-product-name-search-host');
+
+    let controlGroup = h1.querySelector('.les-product-name-actions');
+    if (!controlGroup) {
+        controlGroup = document.createElement('span');
+        controlGroup.className = 'les-product-name-actions';
+    }
+
+    let copyButton = h1.querySelector('.lekolar-copy-btn[data-type="name"]');
+    if (!copyButton) {
+        copyButton = createCopyButton(() => getProductName(), 'name');
+    }
+    if (copyButton && copyButton.parentElement !== controlGroup) {
+        controlGroup.appendChild(copyButton);
+    }
+
+    let button = h1.querySelector('.les-product-name-search-btn');
+    if (!button) {
+        button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'lekolar-copy-btn les-product-name-search-btn';
+        button.dataset.type = 'similar-name';
+        button.title = 'Find similar products from name';
+        button.setAttribute('aria-label', 'Find similar products from name');
+        button.setAttribute('aria-pressed', 'false');
+
+        const tooltip = document.createElement('span');
+        tooltip.className = 'tooltip';
+        tooltip.textContent = 'Find similar products';
+
+        button.appendChild(createSearchSvg(16));
+        button.appendChild(tooltip);
+        button.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            activateProductNameSearch(h1, button);
+        });
+    }
+
+    if (button.parentElement !== controlGroup) {
+        controlGroup.appendChild(button);
+    }
+
+    if (controlGroup.parentElement !== h1) {
+        h1.insertBefore(controlGroup, h1.firstChild);
+    } else if (controlGroup !== h1.firstChild) {
+        h1.insertBefore(controlGroup, h1.firstChild);
+    }
+
+    if (!h1.querySelector('.les-product-name-search-text')) {
+        renderProductNameSearchText(h1, name);
+    }
 }
 
 function getMainProductCode() {
@@ -1204,14 +1524,14 @@ function findAndInject() {
         }
     }
 
-    // 2. Inject Product Name Button
-    if (!document.querySelector('.lekolar-copy-btn[data-type="name"]')) {
-        // Strict targeting so it doesn't accidentally attach to search result counters or category titles
-        const h1 = document.querySelector('.product-info h1, .product-page-wrapper h1, .product-page h1');
-        if (h1) {
-            const name = h1.innerText.trim();
-            const btn = createCopyButton(name, 'name');
-            h1.appendChild(btn);
+    // 2. Inject Product Name Button + similar-name search control.
+    const productNameHeading = getProductNameElement();
+    if (productNameHeading) {
+        const productName = getProductNameFromElement(productNameHeading);
+        if (productName) {
+            productNameHeading.dataset.lesProductName = productName;
+
+            ensureProductNameSearchControl(productNameHeading);
         }
     }
 
@@ -2319,6 +2639,77 @@ function getProductCardName(card) {
     return null;
 }
 
+function getProductCardNameElement(card) {
+    if (!card) return null;
+
+    const selectors = [
+        '.product-title a[href*="/verkkokauppa/"]',
+        '.product-title a[href*="/sortiment/"]',
+        '.inner-title a[href*="/verkkokauppa/"]',
+        '.inner-title a[href*="/sortiment/"]',
+        'h3 a[href*="/verkkokauppa/"]',
+        'h3 a[href*="/sortiment/"]',
+        '.product-name a[href*="/verkkokauppa/"]',
+        '.product-name a[href*="/sortiment/"]',
+        '.eS-productname a[href*="/verkkokauppa/"]',
+        '.eS-productname a[href*="/sortiment/"]',
+        '.product-title',
+        '.inner-title',
+        'h3',
+        '.product-name',
+        '.eS-productname',
+        'a[href*="/verkkokauppa/"]',
+        'a[href*="/sortiment/"]'
+    ];
+
+    for (const selector of selectors) {
+        const element = card.querySelector(selector);
+        const text = element ? normalizeWhitespace(element.textContent || '') : '';
+        if (text) return element;
+    }
+
+    return null;
+}
+
+function injectNameSearchOnCard(card) {
+    if (!card || card.querySelector('.les-card-name-search-btn')) return;
+
+    const nameElement = getProductCardNameElement(card);
+    if (!nameElement) return;
+
+    const name = getProductNameFromElement(nameElement);
+    if (!name) return;
+
+    nameElement.dataset.lesProductName = name;
+
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'lekolar-copy-btn lekolar-hover-copy les-card-name-search-btn';
+    button.dataset.type = 'similar-card-name';
+    button.title = 'Find similar products from name';
+    button.setAttribute('aria-label', 'Find similar products from name');
+    button.setAttribute('aria-pressed', 'false');
+
+    const tooltip = document.createElement('span');
+    tooltip.className = 'tooltip';
+    tooltip.textContent = 'Find similar products';
+
+    button.appendChild(createSearchSvg(16));
+    button.appendChild(tooltip);
+    button.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        activateProductNameSearch(nameElement, button);
+    });
+
+    const titleContainer = nameElement.closest('.product-title, .inner-title, h3, .product-name, .eS-productname') || nameElement.parentElement;
+    if (titleContainer && titleContainer !== nameElement && titleContainer.parentElement) {
+        titleContainer.appendChild(button);
+    } else if (nameElement.parentElement) {
+        nameElement.parentElement.insertBefore(button, nameElement.nextSibling);
+    }
+}
+
 function injectCopyButtonOnCard(card, number) {
     if (card.querySelector('.lekolar-copy-btn[data-type="number"]')) return;
 
@@ -2344,6 +2735,8 @@ function injectCopyButtonOnCard(card, number) {
 }
 
 async function handleProductCardHover(card) {
+    injectNameSearchOnCard(card);
+
     if (card.querySelector('.lekolar-copy-btn[data-type="number"]')) return;
 
     const url = getProductCardUrl(card);
