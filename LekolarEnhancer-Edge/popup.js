@@ -1,20 +1,6 @@
-// popup.js — Settings logic for popup
+// popup.js — Slim popup. Just the master power switch, the SharePoint
+// entitlement status, and a button that opens the full settings page.
 
-const DEFAULTS = {
-    infiniteScroll: true,
-    copyButtons: true,
-    hideEnvironmentalLogo: false,
-    modifierKey: 'shiftKey',
-    secondaryModifierKey: 'altKey',
-    countries: {
-        fi: { enabled: true, url: 'https://www.lekolar.fi/haku/?query=' },
-        se: { enabled: false, url: 'https://www.lekolar.se/sok/?query=' },
-        no: { enabled: false, url: 'https://www.lekolar.no/sok/?query=' },
-        dk: { enabled: false, url: 'https://www.lekolar.dk/sog/?query=' }
-    }
-};
-
-const COUNTRY_CODES = ['fi', 'se', 'no', 'dk'];
 const ENTITLEMENT_CACHE_KEY = 'lesSharePointEntitlement';
 const SHAREPOINT_PROBE_URL = 'https://lekolarab.sharepoint.com/_api/web/currentuser?$select=Id,Title';
 const LEKOLAR_HOST_RULES = [
@@ -24,143 +10,68 @@ const LEKOLAR_HOST_RULES = [
     { suffix: '.lekolar.dk', pattern: '*://*.lekolar.dk/*' }
 ];
 
-// DOM refs
-const infiniteScrollEl = document.getElementById('infiniteScroll');
-const copyButtonsEl = document.getElementById('copyButtons');
-const hideEnvironmentalLogoEl = document.getElementById('hideEnvironmentalLogo');
-const modifierKeyEl = document.getElementById('modifierKey');
-const secondaryModifierKeyEl = document.getElementById('secondaryModifierKey');
-const saveIndicator = document.getElementById('saveIndicator');
+const powerBtn = document.getElementById('powerBtn');
+const powerLabel = document.getElementById('powerLabel');
+const powerHint = document.getElementById('powerHint');
 const permissionWarningEl = document.getElementById('permissionWarning');
 const recheckEntitlementBtn = document.getElementById('recheckEntitlementBtn');
 const entitlementStatusEl = document.getElementById('entitlementStatus');
+const openSettingsBtn = document.getElementById('openSettingsBtn');
+const openWhatsNewBtn = document.getElementById('openWhatsNewBtn');
+const whatsNewDot = document.getElementById('whatsNewDot');
 
-// Country refs
-const countryRadios = {};
-const countryUrls = {};
-COUNTRY_CODES.forEach(code => {
-    countryRadios[code] = document.getElementById(`country-${code}`);
-    countryUrls[code] = document.getElementById(`url-${code}`);
+let isEnabled = true;
+
+function paintPower() {
+    powerBtn.classList.toggle('off', !isEnabled);
+    if (isEnabled) {
+        powerLabel.textContent = 'Enabled';
+        powerLabel.style.color = '#a6e3a1';
+        powerHint.textContent = 'Click to disable on all Lekolar sites';
+    } else {
+        powerLabel.textContent = 'Disabled';
+        powerLabel.style.color = '#f38ba8';
+        powerHint.textContent = 'Click to re-enable';
+    }
+}
+
+function loadPower() {
+    chrome.storage.sync.get('extensionEnabled', (data) => {
+        isEnabled = data.extensionEnabled !== false;
+        paintPower();
+    });
+}
+
+powerBtn.addEventListener('click', () => {
+    isEnabled = !isEnabled;
+    paintPower();
+    chrome.storage.sync.set({ extensionEnabled: isEnabled });
 });
 
-// Load saved settings
-function loadSettings() {
-    chrome.storage.sync.get(null, (data) => {
-        const settings = { ...DEFAULTS, ...data };
-        if (data.countries) {
-            settings.countries = { ...DEFAULTS.countries };
-            COUNTRY_CODES.forEach(code => {
-                settings.countries[code] = { ...DEFAULTS.countries[code], ...(data.countries[code] || {}) };
-            });
-        }
-
-        infiniteScrollEl.checked = settings.infiniteScroll;
-        copyButtonsEl.checked = settings.copyButtons;
-        hideEnvironmentalLogoEl.checked = settings.hideEnvironmentalLogo;
-        modifierKeyEl.value = settings.modifierKey;
-        secondaryModifierKeyEl.value = settings.secondaryModifierKey || DEFAULTS.secondaryModifierKey;
-
-        // Find which country is enabled and select its radio
-        let activeCode = 'fi'; // Default fallback
-        COUNTRY_CODES.forEach(code => {
-            if (settings.countries[code].enabled) {
-                activeCode = code;
-            }
-            // Set URLs
-            countryUrls[code].value = settings.countries[code].url;
-        });
-        if (countryRadios[activeCode]) {
-            countryRadios[activeCode].checked = true;
-        }
-    });
-}
-
-// Save all settings
-function saveSettings() {
-    const countries = {};
-    COUNTRY_CODES.forEach(code => {
-        countries[code] = {
-            enabled: countryRadios[code].checked,
-            url: countryUrls[code].value.trim() || DEFAULTS.countries[code].url
-        };
-    });
-
-    const settings = {
-        infiniteScroll: infiniteScrollEl.checked,
-        copyButtons: copyButtonsEl.checked,
-        hideEnvironmentalLogo: hideEnvironmentalLogoEl.checked,
-        modifierKey: modifierKeyEl.value,
-        secondaryModifierKey: secondaryModifierKeyEl.value,
-        countries
-    };
-
-    chrome.storage.sync.set(settings, () => {
-        showSaveIndicator();
-    });
-}
-
-function showSaveIndicator() {
-    saveIndicator.classList.add('visible');
-    clearTimeout(showSaveIndicator._timer);
-    showSaveIndicator._timer = setTimeout(() => {
-        saveIndicator.classList.remove('visible');
-    }, 1500);
-}
-
-function updatePermissionWarning(hasAccess) {
-    if (!permissionWarningEl) return;
-    permissionWarningEl.classList.toggle('hidden', hasAccess);
-}
-
-function getLekolarPatternForUrl(url) {
-    if (!url) return null;
-    try {
-        const host = new URL(url).hostname.toLowerCase();
-        for (const rule of LEKOLAR_HOST_RULES) {
-            const bare = rule.suffix.replace(/^\./, '');
-            if (host === bare || host.endsWith(rule.suffix)) {
-                return rule.pattern;
-            }
-        }
-    } catch (e) {
-        return null;
+openSettingsBtn.addEventListener('click', () => {
+    if (chrome.runtime.openOptionsPage) {
+        chrome.runtime.openOptionsPage();
+    } else {
+        chrome.tabs.create({ url: chrome.runtime.getURL('options.html') });
     }
-    return null;
-}
+});
 
-function withActiveTab(callback) {
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-        const tab = tabs && tabs.length ? tabs[0] : null;
-        callback(tab);
+openWhatsNewBtn.addEventListener('click', () => {
+    chrome.tabs.create({ url: chrome.runtime.getURL('options.html#whatsnew') });
+    chrome.storage.sync.set({ lastSeenVersion: chrome.runtime.getManifest().version });
+});
+
+// "What's new" dot: show if stored lastSeenVersion != current.
+function paintWhatsNewDot() {
+    const current = chrome.runtime.getManifest().version;
+    chrome.storage.sync.get('lastSeenVersion', (data) => {
+        const seen = data && data.lastSeenVersion;
+        whatsNewDot.classList.toggle('hidden', seen === current);
     });
 }
 
-function checkLekolarPermissions() {
-    if (!chrome.permissions || !chrome.permissions.contains) {
-        // If API is unavailable, don't show a false warning.
-        updatePermissionWarning(true);
-        return;
-    }
-
-    withActiveTab((tab) => {
-        const originPattern = getLekolarPatternForUrl(tab && tab.url ? tab.url : '');
-        if (!originPattern) {
-            updatePermissionWarning(true);
-            return;
-        }
-
-        chrome.permissions.contains({ origins: [originPattern] }, (hasAccess) => {
-            if (chrome.runtime.lastError) {
-                console.warn('LES popup: permission check failed', chrome.runtime.lastError.message);
-                updatePermissionWarning(true);
-                return;
-            }
-            updatePermissionWarning(Boolean(hasAccess));
-        });
-    });
-}
-
-function setEntitlementStatus(text, tone = '') {
+// --- SharePoint entitlement ---
+function setEntitlementStatus(text, tone) {
     if (!entitlementStatusEl) return;
     entitlementStatusEl.textContent = text;
     entitlementStatusEl.classList.remove('ok', 'warn', 'error');
@@ -203,29 +114,20 @@ function requestEntitlementProbe() {
         chrome.runtime.sendMessage({ action: 'probeSharePointEntitlement', probeUrl: SHAREPOINT_PROBE_URL }, (response) => {
             if (chrome.runtime.lastError) {
                 resolve({
-                    status: 'error',
-                    entitled: false,
+                    status: 'error', entitled: false,
                     error: chrome.runtime.lastError.message,
                     checkedAt: Date.now()
                 });
                 return;
             }
-            resolve(response || {
-                status: 'error',
-                entitled: false,
-                error: 'empty_response',
-                checkedAt: Date.now()
-            });
+            resolve(response || { status: 'error', entitled: false, error: 'empty_response', checkedAt: Date.now() });
         });
     });
 }
 
 function persistEntitlementResult(result) {
     return new Promise((resolve) => {
-        if (!chrome.storage || !chrome.storage.local) {
-            resolve();
-            return;
-        }
+        if (!chrome.storage || !chrome.storage.local) { resolve(); return; }
         const shouldCache = result && (
             result.status === 'entitled' ||
             result.status === 'login_required' ||
@@ -234,7 +136,6 @@ function persistEntitlementResult(result) {
         if (shouldCache) {
             chrome.storage.local.set({ [ENTITLEMENT_CACHE_KEY]: result }, () => resolve());
         } else if (result && result.status === 'error') {
-            // Keep the previous known state if probe failed transiently.
             resolve();
         } else {
             chrome.storage.local.remove(ENTITLEMENT_CACHE_KEY, () => resolve());
@@ -242,17 +143,17 @@ function persistEntitlementResult(result) {
     });
 }
 
+function withActiveTab(callback) {
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        callback(tabs && tabs.length ? tabs[0] : null);
+    });
+}
+
 function notifyActiveTabRefresh() {
     return new Promise((resolve) => {
         withActiveTab((tab) => {
-            if (!tab || !tab.id) {
-                resolve();
-                return;
-            }
-            chrome.tabs.sendMessage(tab.id, { action: 'lesRefreshEntitlement' }, () => {
-                // Ignore "receiving end" errors if content script isn't on the active tab.
-                resolve();
-            });
+            if (!tab || !tab.id) { resolve(); return; }
+            chrome.tabs.sendMessage(tab.id, { action: 'lesRefreshEntitlement' }, () => resolve());
         });
     });
 }
@@ -275,149 +176,46 @@ async function recheckEntitlementNow() {
     }
 
     recheckEntitlementBtn.disabled = false;
-    recheckEntitlementBtn.textContent = 'Re-check SharePoint Access';
+    recheckEntitlementBtn.textContent = 'Re-check';
 }
 
-// --- AI Search ---
-const AI_PROVIDER_STORAGE_KEY = 'lesAiProvider';
-const aiProviderEl = document.getElementById('aiProvider');
-const aiInputEl = document.getElementById('aiInput');
-const aiSendBtn = document.getElementById('aiSendBtn');
-const aiStatusEl = document.getElementById('aiStatus');
-const aiPreviewEl = document.getElementById('aiPreview');
-const aiPreviewQueryEl = document.getElementById('aiPreviewQuery');
-const aiPreviewChipsEl = document.getElementById('aiPreviewChips');
-const aiOpenBtn = document.getElementById('aiOpenBtn');
-const aiCancelBtn = document.getElementById('aiCancelBtn');
-const openOptionsBtn = document.getElementById('openOptionsBtn');
-
-let aiPendingUrl = '';
-
-function setAiStatus(text, tone) {
-    if (!aiStatusEl) return;
-    aiStatusEl.textContent = text || '';
-    aiStatusEl.classList.remove('ok', 'warn', 'error');
-    if (tone) aiStatusEl.classList.add(tone);
+// --- Lekolar host permission warning (kept from old popup) ---
+function getLekolarPatternForUrl(url) {
+    if (!url) return null;
+    try {
+        const host = new URL(url).hostname.toLowerCase();
+        for (const rule of LEKOLAR_HOST_RULES) {
+            const bare = rule.suffix.replace(/^\./, '');
+            if (host === bare || host.endsWith(rule.suffix)) return rule.pattern;
+        }
+    } catch (e) { return null; }
+    return null;
 }
 
-function renderAiPreview(extracted, url) {
-    aiPendingUrl = url || '';
-    const cat = extracted.category && extracted.category !== '_default' ? ` [${extracted.category}]` : '';
-    aiPreviewQueryEl.textContent = (extracted.query || '(no query)') + cat;
-    aiPreviewChipsEl.innerHTML = '';
-    const entries = Object.entries(extracted.filters || {});
-    if (entries.length === 0) {
-        const chip = document.createElement('span');
-        chip.className = 'ai-chip';
-        chip.textContent = 'no filters';
-        aiPreviewChipsEl.appendChild(chip);
-    } else {
-        entries.forEach(([k, v]) => {
-            const chip = document.createElement('span');
-            chip.className = 'ai-chip';
-            chip.textContent = `${k}: ${v}`;
-            aiPreviewChipsEl.appendChild(chip);
+function updatePermissionWarning(hasAccess) {
+    if (!permissionWarningEl) return;
+    permissionWarningEl.classList.toggle('hidden', hasAccess);
+}
+
+function checkLekolarPermissions() {
+    if (!chrome.permissions || !chrome.permissions.contains) {
+        updatePermissionWarning(true);
+        return;
+    }
+    withActiveTab((tab) => {
+        const originPattern = getLekolarPatternForUrl(tab && tab.url ? tab.url : '');
+        if (!originPattern) { updatePermissionWarning(true); return; }
+        chrome.permissions.contains({ origins: [originPattern] }, (hasAccess) => {
+            if (chrome.runtime.lastError) { updatePermissionWarning(true); return; }
+            updatePermissionWarning(Boolean(hasAccess));
         });
-    }
-    aiPreviewEl.classList.remove('hidden');
-}
-
-function hideAiPreview() {
-    aiPendingUrl = '';
-    aiPreviewEl.classList.add('hidden');
-}
-
-function sendAiSearch() {
-    const userText = (aiInputEl.value || '').trim();
-    if (!userText) return;
-    const provider = aiProviderEl.value;
-
-    hideAiPreview();
-    setAiStatus('Thinking…', 'warn');
-    aiSendBtn.disabled = true;
-
-    chrome.runtime.sendMessage({ action: 'lesAiSearch', provider, userText }, (response) => {
-        aiSendBtn.disabled = false;
-        if (chrome.runtime.lastError) {
-            setAiStatus(`Error: ${chrome.runtime.lastError.message}`, 'error');
-            return;
-        }
-        if (!response || !response.ok) {
-            const err = (response && response.error) || 'unknown_error';
-            if (err === 'missing_api_key') {
-                setAiStatus('No API key for this provider. Open settings.', 'error');
-            } else {
-                setAiStatus(`Error: ${err}`, 'error');
-            }
-            return;
-        }
-        setAiStatus('Review and open:', 'ok');
-        renderAiPreview(response.extracted, response.url);
     });
 }
 
-function loadAiProvider() {
-    chrome.storage.local.get(AI_PROVIDER_STORAGE_KEY, (data) => {
-        const saved = data[AI_PROVIDER_STORAGE_KEY];
-        if (saved && ['openai', 'anthropic', 'gemini'].includes(saved)) {
-            aiProviderEl.value = saved;
-        }
-    });
-}
-
-function saveAiProvider() {
-    chrome.storage.local.set({ [AI_PROVIDER_STORAGE_KEY]: aiProviderEl.value });
-}
-
-aiProviderEl.addEventListener('change', saveAiProvider);
-
-aiSendBtn.addEventListener('click', sendAiSearch);
-aiInputEl.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') {
-        e.preventDefault();
-        sendAiSearch();
-    }
-});
-
-aiOpenBtn.addEventListener('click', () => {
-    if (!aiPendingUrl) return;
-    chrome.tabs.create({ url: aiPendingUrl });
-});
-aiCancelBtn.addEventListener('click', () => {
-    hideAiPreview();
-    setAiStatus('', '');
-});
-
-openOptionsBtn.addEventListener('click', () => {
-    if (chrome.runtime.openOptionsPage) {
-        chrome.runtime.openOptionsPage();
-    } else {
-        chrome.tabs.create({ url: chrome.runtime.getURL('options.html') });
-    }
-});
-
-loadAiProvider();
-
-// Auto-save on change
-infiniteScrollEl.addEventListener('change', saveSettings);
-copyButtonsEl.addEventListener('change', saveSettings);
-hideEnvironmentalLogoEl.addEventListener('change', saveSettings);
-modifierKeyEl.addEventListener('change', saveSettings);
-secondaryModifierKeyEl.addEventListener('change', saveSettings);
-
-COUNTRY_CODES.forEach(code => {
-    countryRadios[code].addEventListener('change', saveSettings);
-    // Debounce URL input saves
-    let urlTimer;
-    countryUrls[code].addEventListener('input', () => {
-        clearTimeout(urlTimer);
-        urlTimer = setTimeout(saveSettings, 500);
-    });
-});
-
-// Initialize
+// Init
 document.getElementById('versionLabel').textContent = 'v' + chrome.runtime.getManifest().version;
-loadSettings();
+loadPower();
+paintWhatsNewDot();
 checkLekolarPermissions();
 loadCachedEntitlementStatus();
 if (recheckEntitlementBtn) {

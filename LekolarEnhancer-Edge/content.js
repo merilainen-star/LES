@@ -1,12 +1,38 @@
 // content.js
-let currentSettings = {
-    infiniteScroll: true,
-    copyButtons: true,
-    hideEnvironmentalLogo: false,
-    modifierKey: 'shiftKey',
-    secondaryModifierKey: 'altKey'
-};
+let currentSettings = (typeof lesMergeSettings === 'function')
+    ? lesMergeSettings(null)
+    : {
+        extensionEnabled: true,
+        enabledCountries: { fi: true, se: true, no: true, dk: true },
+        infiniteScroll: true,
+        copyButtons: true,
+        hideEnvironmentalLogo: false,
+        modifierKey: 'shiftKey',
+        secondaryModifierKey: 'altKey',
+        copyFormats: (typeof LES_DEFAULT_FORMATS !== 'undefined') ? LES_DEFAULT_FORMATS : null,
+        debugLogging: false
+    };
+function lesDebugLog() {
+    if (currentSettings && currentSettings.debugLogging) {
+        // eslint-disable-next-line no-console
+        console.log.apply(console, ['[LES]', ...arguments]);
+    }
+}
 console.info('LES content script loaded');
+
+// Master kill switch + per-country gating. Returns true when the content
+// script should not mutate the page at all on this host.
+function lesContentDisabled() {
+    if (!currentSettings || currentSettings.extensionEnabled === false) return true;
+    const code = (typeof lesCountryForHost === 'function')
+        ? lesCountryForHost(location.hostname)
+        : null;
+    if (!code) return false;
+    if (currentSettings.enabledCountries && currentSettings.enabledCountries[code] === false) {
+        return true;
+    }
+    return false;
+}
 
 const SHAREPOINT_PROBE_URL = 'https://lekolarab.sharepoint.com/_api/web/currentuser?$select=Id,Title';
 const ENTITLEMENT_CACHE_KEY = 'lesSharePointEntitlement';
@@ -803,15 +829,26 @@ function createCopyButton(textGetter, type, options = {}) {
     button.appendChild(svg);
     button.appendChild(tooltip);
 
+    function lesPickFormatSlot(e) {
+        const isPrimary = currentSettings.modifierKey && currentSettings.modifierKey !== 'none' && e[currentSettings.modifierKey];
+        const isSecondary = !isPrimary && currentSettings.secondaryModifierKey && currentSettings.secondaryModifierKey !== 'none' && e[currentSettings.secondaryModifierKey];
+        return isPrimary ? 'primary' : isSecondary ? 'secondary' : 'default';
+    }
+
+    function lesGetFormat(slot) {
+        const formats = (currentSettings && currentSettings.copyFormats) || (typeof LES_DEFAULT_FORMATS !== 'undefined' ? LES_DEFAULT_FORMATS : {});
+        return formats[slot] || (typeof LES_DEFAULT_FORMATS !== 'undefined' ? LES_DEFAULT_FORMATS[slot] : null);
+    }
+
     // Shared helper to update tooltip based on modifier key state
     function updateTooltip(e) {
         const tooltip = button.querySelector('.tooltip');
-        const isPrimary = currentSettings.modifierKey !== 'none' && e[currentSettings.modifierKey];
-        const isSecondary = !isPrimary && currentSettings.secondaryModifierKey !== 'none' && e[currentSettings.secondaryModifierKey];
-        if (isPrimary) {
-            tooltip.innerText = "Copy number + name (Link)";
-        } else if (isSecondary) {
-            tooltip.innerText = "Copy number + name";
+        const slot = lesPickFormatSlot(e);
+        const fmt = lesGetFormat(slot);
+        if (slot === 'default') {
+            tooltip.innerText = `Copy ${type}`;
+        } else if (fmt && fmt.label) {
+            tooltip.innerText = fmt.asLink ? `Copy: ${fmt.label} (link)` : `Copy: ${fmt.label}`;
         } else {
             tooltip.innerText = `Copy ${type}`;
         }
@@ -848,56 +885,44 @@ function createCopyButton(textGetter, type, options = {}) {
         e.preventDefault();
         e.stopPropagation();
 
-        let textToCopy = getValue();
-        const isPrimary = currentSettings.modifierKey !== 'none' && e[currentSettings.modifierKey];
-        const isSecondary = !isPrimary && currentSettings.secondaryModifierKey !== 'none' && e[currentSettings.secondaryModifierKey];
+        const ownValue = getValue();
+        const slot = lesPickFormatSlot(e);
+        const fmt = lesGetFormat(slot);
 
-        if (isPrimary) {
-            const context = typeof getCopyContext === 'function' ? (getCopyContext() || {}) : {};
-            const name = context.name || getProductName();
-            const number = context.number || ((type === 'number' && textToCopy) ? textToCopy : getProductNumber());
-            const url = context.url || window.location.href;
+        const context = typeof getCopyContext === 'function' ? (getCopyContext() || {}) : {};
+        const name = context.name || getProductName();
+        const number = context.number || ((type === 'number' && ownValue) ? ownValue : getProductNumber());
+        const url = context.url || window.location.href;
+        const ctx = { number, name, url, value: ownValue };
 
-            if (name && number) {
-                const plainText = `${number} ${name} - ${url}`;
-                const htmlText = `<a href="${escapeHtml(url)}">${escapeHtml(number)} ${escapeHtml(name)}</a>`;
+        const renderFn = (typeof lesRenderCopyFormat === 'function') ? lesRenderCopyFormat : null;
+        let plainText = (fmt && renderFn) ? renderFn(fmt, ctx) : '';
+        if (!plainText) plainText = ownValue || '';
+        if (!plainText) return;
 
-                try {
-                    const clipboardItem = new ClipboardItem({
-                        "text/plain": new Blob([plainText], { type: "text/plain" }),
-                        "text/html": new Blob([htmlText], { type: "text/html" })
-                    });
+        const wantLink = !!(fmt && fmt.asLink) && !!url;
 
-                    navigator.clipboard.write([clipboardItem]).then(onCopySuccess).catch(err => {
-                        console.warn('LES: Failed to copy rich text:', err);
-                        navigator.clipboard.writeText(plainText).then(onCopySuccess);
-                    });
-                } catch (e) {
-                    // Fallback for browsers (like some Firefox setups) that don't support ClipboardItem natively
-                    navigator.clipboard.writeText(plainText).then(onCopySuccess);
-                }
-                return;
-            }
-        }
-
-        if (isSecondary) {
-            const context = typeof getCopyContext === 'function' ? (getCopyContext() || {}) : {};
-            const name = context.name || getProductName();
-            const number = context.number || ((type === 'number' && textToCopy) ? textToCopy : getProductNumber());
-
-            if (name && number) {
-                navigator.clipboard.writeText(`${number} ${name}`).then(onCopySuccess).catch(err => {
-                    console.error('Failed to copy text: ', err);
+        if (wantLink) {
+            const escFn = (typeof lesEscapeHtmlForCopy === 'function') ? lesEscapeHtmlForCopy : escapeHtml;
+            const htmlText = `<a href="${escFn(url)}">${escFn(plainText)}</a>`;
+            try {
+                const clipboardItem = new ClipboardItem({
+                    "text/plain": new Blob([plainText], { type: "text/plain" }),
+                    "text/html": new Blob([htmlText], { type: "text/html" })
                 });
-                return;
+                navigator.clipboard.write([clipboardItem]).then(onCopySuccess).catch(err => {
+                    console.warn('LES: Failed to copy rich text:', err);
+                    navigator.clipboard.writeText(plainText).then(onCopySuccess);
+                });
+            } catch (err) {
+                navigator.clipboard.writeText(plainText).then(onCopySuccess);
             }
+            return;
         }
 
-        if (textToCopy) {
-            navigator.clipboard.writeText(textToCopy).then(onCopySuccess).catch(err => {
-                console.error('Failed to copy text: ', err);
-            });
-        }
+        navigator.clipboard.writeText(plainText).then(onCopySuccess).catch(err => {
+            console.error('Failed to copy text: ', err);
+        });
 
         function onCopySuccess() {
             const tooltip = button.querySelector('.tooltip');
@@ -2872,14 +2897,11 @@ function compactSearchPage() {
 // Settings
 async function loadSettingsAndInit() {
     try {
-        const items = await storageSyncGet({
-            infiniteScroll: true,
-            copyButtons: true,
-            hideEnvironmentalLogo: false,
-            modifierKey: 'shiftKey',
-            secondaryModifierKey: 'altKey'
-        });
-        currentSettings = items;
+        // Pull everything we know about; merge against defaults to fill gaps.
+        const items = await storageSyncGet(null);
+        currentSettings = (typeof lesMergeSettings === 'function')
+            ? lesMergeSettings(items)
+            : { ...currentSettings, ...items };
     } catch (error) {
         console.error('LES Error: Failed to read settings', error);
     }
@@ -2889,7 +2911,7 @@ async function loadSettingsAndInit() {
 
     try {
         await resolveRestrictedFeatureAccess(false);
-        console.info('LES entitlement status:', restrictedFeatureAccess);
+        lesDebugLog('entitlement status:', restrictedFeatureAccess);
     } catch (error) {
         // Fail closed for restricted features if probe resolution throws.
         restrictedFeatureAccess = {
@@ -2906,6 +2928,14 @@ async function loadSettingsAndInit() {
 
 // Initialize
 function initAll() {
+    if (lesContentDisabled()) {
+        // Master switch off, or this country is disabled. Tear down any UI
+        // that may have been injected before the flag flipped.
+        cleanupRestrictedUi();
+        try { applyEnvironmentalLogoVisibility(); } catch (e) {}
+        return;
+    }
+
     if (!canUseRestrictedFeatures()) {
         cleanupRestrictedUi();
     }
@@ -2959,6 +2989,7 @@ const pageObserver = new MutationObserver((mutations) => {
         // Debounce to improve performance
         clearTimeout(mutationTimeout);
         mutationTimeout = setTimeout(() => {
+            if (lesContentDisabled()) return;
             if (currentSettings.infiniteScroll) initSearchConsolidation();
             if (currentSettings.copyButtons) {
                 findAndInject();

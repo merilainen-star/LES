@@ -18,14 +18,21 @@ if (-not (Test-Path -LiteralPath $edgePath)) {
 }
 
 $filesToCopy = @(
+    "defaults.js",
     "background.js",
     "content.js",
     "popup.html",
     "popup.js",
     "popup.css",
+    "options.html",
+    "options.js",
+    "options.css",
+    "cryptoVault.js",
     "searchUtils.js",
     "style.css",
-    "logo.png"
+    "logo.png",
+    "CHANGELOG.md",
+    "README.md"
 )
 
 foreach ($relativeFile in $filesToCopy) {

@@ -4,6 +4,7 @@
 if (typeof importScripts === 'function') {
     try {
         importScripts(
+            'defaults.js',
             'searchUtils.js',
             'cryptoVault.js',
             'facetVocabulary.js',
@@ -35,38 +36,34 @@ async function lesAiResolveQueryViaProvider(provider, userText, model) {
     return extracted;
 }
 
-const DEFAULT_SETTINGS = {
-    infiniteScroll: true,
-    copyButtons: true,
-    modifierKey: 'shiftKey',
-    countries: {
-        fi: { enabled: true, url: 'https://www.lekolar.fi/haku/?query=' },
-        se: { enabled: false, url: 'https://www.lekolar.se/sok/?query=' },
-        no: { enabled: false, url: 'https://www.lekolar.no/sok/?query=' },
-        dk: { enabled: false, url: 'https://www.lekolar.dk/sog/?query=' }
-    }
-};
+// DEFAULT_SETTINGS now lives in defaults.js (LES_DEFAULT_SETTINGS) so popup,
+// content, and background share one source of truth.
+const DEFAULT_SETTINGS = (typeof LES_DEFAULT_SETTINGS !== 'undefined')
+    ? LES_DEFAULT_SETTINGS
+    : {
+        extensionEnabled: true,
+        enabledCountries: { fi: true, se: true, no: true, dk: true },
+        infiniteScroll: true,
+        copyButtons: true,
+        modifierKey: 'shiftKey',
+        countries: {
+            fi: { enabled: true, url: 'https://www.lekolar.fi/haku/?query=' },
+            se: { enabled: false, url: 'https://www.lekolar.se/sok/?query=' },
+            no: { enabled: false, url: 'https://www.lekolar.no/sok/?query=' },
+            dk: { enabled: false, url: 'https://www.lekolar.dk/sog/?query=' }
+        }
+    };
 
 const DEFAULT_SHAREPOINT_PROBE_URL = 'https://lekolarab.sharepoint.com/_api/web/currentuser?$select=Id,Title';
 const SHAREPOINT_REQUEST_TIMEOUT_MS = 12000;
 
-// Set defaults on install
+// Set defaults on install / upgrade. Always write the merged result so any
+// new defaults added in this version land in storage on first launch.
 chrome.runtime.onInstalled.addListener(() => {
     chrome.storage.sync.get(null, (existing) => {
-        const merged = { ...DEFAULT_SETTINGS };
-        // Preserve any existing settings
-        if (existing && Object.keys(existing).length > 0) {
-            if (existing.infiniteScroll !== undefined) merged.infiniteScroll = existing.infiniteScroll;
-            if (existing.copyButtons !== undefined) merged.copyButtons = existing.copyButtons;
-            if (existing.modifierKey !== undefined) merged.modifierKey = existing.modifierKey;
-            if (existing.countries) {
-                for (const code of ['fi', 'se', 'no', 'dk']) {
-                    if (existing.countries[code]) {
-                        merged.countries[code] = { ...DEFAULT_SETTINGS.countries[code], ...existing.countries[code] };
-                    }
-                }
-            }
-        }
+        const merged = (typeof lesMergeSettings === 'function')
+            ? lesMergeSettings(existing || {})
+            : { ...DEFAULT_SETTINGS, ...(existing || {}) };
         chrome.storage.sync.set(merged);
     });
 });
@@ -133,9 +130,10 @@ chrome.omnibox.onInputEntered.addListener((text, disposition) => {
         queryText = countryMatch[2].trim();
     }
 
-    chrome.storage.sync.get('countries', (data) => {
-        const countries = data.countries || DEFAULT_SETTINGS.countries;
-        
+    chrome.storage.sync.get(null, (data) => {
+        if (data && data.extensionEnabled === false) return;
+        const countries = (data && data.countries) || DEFAULT_SETTINGS.countries;
+
         if (!code) {
             for (const c of ['fi', 'se', 'no', 'dk']) {
                 if (countries[c] && countries[c].enabled) {
@@ -143,14 +141,14 @@ chrome.omnibox.onInputEntered.addListener((text, disposition) => {
                 }
             }
         }
-        if (!code) code = 'fi'; 
-        
+        if (!code) code = 'fi';
+
         let presetUrl = (countries[code] && countries[code].url) || DEFAULT_SETTINGS.countries[code].url;
         let baseUrl = presetUrl.split('?')[0];
-        
+
         const parsed = parseOmniboxQuery(queryText);
         let fullUrl = "";
-        
+
         if (typeof buildLekolarSearchUrl !== 'undefined') {
              fullUrl = buildLekolarSearchUrl(baseUrl, parsed.query, parsed.filters);
         } else {
@@ -171,8 +169,12 @@ chrome.omnibox.onInputChanged.addListener((text, suggest) => {
     const query = text.trim();
     if (!query) return;
 
-    chrome.storage.sync.get('countries', (data) => {
-        const countries = data.countries || DEFAULT_SETTINGS.countries;
+    chrome.storage.sync.get(null, (data) => {
+        if (data && data.extensionEnabled === false) {
+            suggest([]);
+            return;
+        }
+        const countries = (data && data.countries) || DEFAULT_SETTINGS.countries;
         const suggestions = [];
         for (const code of ['fi', 'se', 'no', 'dk']) {
             if (countries[code] && countries[code].enabled) {
@@ -182,7 +184,7 @@ chrome.omnibox.onInputChanged.addListener((text, suggest) => {
                 });
             }
         }
-        
+
         // Add smart hint if filters are detected
         if (text.includes(':') || text.includes('=')) {
              suggestions.unshift({
@@ -190,7 +192,7 @@ chrome.omnibox.onInputChanged.addListener((text, suggest) => {
                  description: `Apply smart filters: ${query}`
              });
         }
-        
+
         suggest(suggestions);
     });
 });
@@ -462,10 +464,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.action === 'lesAiSearch') {
         (async () => {
             try {
+                const stored = await new Promise(r => chrome.storage.sync.get(null, r));
+                if (stored && stored.aiBetaEnabled === false) {
+                    sendResponse({ ok: false, error: 'beta_disabled' });
+                    return;
+                }
+                const provider = message.provider || (stored && stored.aiProvider) || 'openai';
+                const model = message.model || (stored && stored.aiModels && stored.aiModels[provider]) || '';
                 const extracted = await lesAiResolveQueryViaProvider(
-                    message.provider,
+                    provider,
                     message.userText,
-                    message.model
+                    model
                 );
                 const url = buildLekolarSearchUrl(
                     LES_AI_FI_SEARCH_BASE,
