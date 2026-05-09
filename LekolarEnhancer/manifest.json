@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Lekolar Enhancer",
   "author": "Antigravity",
-  "version": "1.25",
+  "version": "1.26",
   "description": "Adds copy buttons, infinite scroll, and search enhancements for Lekolar sites.",
   "permissions": [
     "activeTab",
@@ -39,6 +39,7 @@
   },
   "background": {
     "scripts": [
+      "defaults.js",
       "searchUtils.js",
       "cryptoVault.js",
       "facetVocabulary.js",
@@ -71,6 +72,7 @@
         "*://*.lekolar.dk/*"
       ],
       "js": [
+        "defaults.js",
         "searchUtils.js",
         "content.js"
       ],
