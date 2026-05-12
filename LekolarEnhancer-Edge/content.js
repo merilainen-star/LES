@@ -67,6 +67,38 @@ let productNoteUserName = 'Me';
 let productLayoutPreference = null;
 let productLayoutPreferenceLoaded = false;
 let productLayoutPreferenceLoadPromise = null;
+const priceAdjustmentOriginalNodes = new WeakMap();
+
+function lesReplaceChildren(element, ...children) {
+    if (!element) return;
+    while (element.firstChild) element.removeChild(element.firstChild);
+    children.forEach(child => {
+        if (child === null || child === undefined) return;
+        element.appendChild(typeof child === 'string' ? document.createTextNode(child) : child);
+    });
+}
+
+function lesCreateElement(tagName, options = {}, ...children) {
+    const element = document.createElement(tagName);
+    if (options.className) element.className = options.className;
+    if (options.text !== undefined) element.textContent = options.text;
+    if (options.type) element.type = options.type;
+    if (options.attrs) {
+        Object.entries(options.attrs).forEach(([name, value]) => {
+            if (value !== null && value !== undefined) element.setAttribute(name, String(value));
+        });
+    }
+    if (options.dataset) {
+        Object.entries(options.dataset).forEach(([name, value]) => {
+            if (value !== null && value !== undefined) element.dataset[name] = String(value);
+        });
+    }
+    children.forEach(child => {
+        if (child === null || child === undefined) return;
+        element.appendChild(typeof child === 'string' ? document.createTextNode(child) : child);
+    });
+    return element;
+}
 
 function storageSyncGet(defaults) {
     return new Promise((resolve) => chrome.storage.sync.get(defaults, resolve));
@@ -1912,18 +1944,26 @@ function ensureSwedishReferencePanel() {
 
     panel = document.createElement('section');
     panel.className = 'les-sv-reference-panel';
-    panel.innerHTML = `
-        <div class="les-sv-reference-header">
-            <div>
-                <strong>Swedish source text</strong>
-                <div class="les-sv-reference-subtitle">Original Swedish product text for quick reference.</div>
-            </div>
-            <button type="button" class="les-sv-reference-close" aria-label="Close Swedish reference">Close</button>
-        </div>
-        <div class="les-sv-reference-status">Loading Swedish reference...</div>
-        <div class="les-sv-reference-body" hidden></div>
-        <div class="les-sv-reference-actions" hidden></div>
-    `;
+    const header = lesCreateElement(
+        'div',
+        { className: 'les-sv-reference-header' },
+        lesCreateElement(
+            'div',
+            {},
+            lesCreateElement('strong', { text: 'Swedish source text' }),
+            lesCreateElement('div', { className: 'les-sv-reference-subtitle', text: 'Original Swedish product text for quick reference.' })
+        ),
+        lesCreateElement('button', { type: 'button', className: 'les-sv-reference-close', text: 'Close', attrs: { 'aria-label': 'Close Swedish reference' } })
+    );
+    const status = lesCreateElement('div', { className: 'les-sv-reference-status', text: 'Loading Swedish reference...' });
+    const body = lesCreateElement('div', { className: 'les-sv-reference-body' });
+    const actions = lesCreateElement('div', { className: 'les-sv-reference-actions' });
+    body.hidden = true;
+    actions.hidden = true;
+    panel.appendChild(header);
+    panel.appendChild(status);
+    panel.appendChild(body);
+    panel.appendChild(actions);
 
     const descriptionContainer = document.querySelector('.product-info .description');
     if (descriptionContainer) {
@@ -2453,12 +2493,15 @@ function renderProductTreeLoading(modal, message) {
     const status = modal.querySelector('.les-product-tree-status');
     if (status) status.textContent = normalizeWhitespace(message || 'Loading tree...');
     if (!body) return;
-    body.innerHTML = `
-        <div class="les-product-tree-loading">
-            <div class="lekolar-spinner"></div>
-            <span>Loading tree...</span>
-        </div>
-    `;
+    lesReplaceChildren(
+        body,
+        lesCreateElement(
+            'div',
+            { className: 'les-product-tree-loading' },
+            lesCreateElement('div', { className: 'lekolar-spinner' }),
+            lesCreateElement('span', { text: 'Loading tree...' })
+        )
+    );
 }
 
 function renderProductTreeError(modal, message) {
@@ -2466,7 +2509,7 @@ function renderProductTreeError(modal, message) {
     const status = modal.querySelector('.les-product-tree-status');
     if (status) status.textContent = 'Could not load tree';
     if (!body) return;
-    body.innerHTML = '';
+    lesReplaceChildren(body);
     const error = document.createElement('div');
     error.className = 'les-product-tree-empty';
     error.textContent = message || 'Could not load category tree.';
@@ -2717,7 +2760,7 @@ function renderProductTree(modal, tree) {
     const body = modal.querySelector('.les-product-tree-modal-body');
     const status = modal.querySelector('.les-product-tree-status');
     if (!body) return;
-    body.innerHTML = '';
+    lesReplaceChildren(body);
 
     const total = countProductTreeNodes(tree);
     if (status) {
@@ -3378,15 +3421,19 @@ function ensureComparePanel() {
 
     panel = document.createElement('aside');
     panel.className = 'les-compare-panel';
-    panel.innerHTML = `
-        <div class="les-compare-panel-header">
-            <strong>Product comparison</strong>
-            <span class="les-compare-count">0/${COMPARE_MAX_ITEMS}</span>
-        </div>
-        <div class="les-compare-list"></div>
-        <button type="button" class="les-compare-open-btn">Compare products</button>
-        <button type="button" class="les-compare-clear-btn">Clear</button>
-    `;
+    const header = lesCreateElement(
+        'div',
+        { className: 'les-compare-panel-header' },
+        lesCreateElement('strong', { text: 'Product comparison' }),
+        lesCreateElement('span', { className: 'les-compare-count', text: `0/${COMPARE_MAX_ITEMS}` })
+    );
+    const list = lesCreateElement('div', { className: 'les-compare-list' });
+    const openButton = lesCreateElement('button', { type: 'button', className: 'les-compare-open-btn', text: 'Compare products' });
+    const clearButton = lesCreateElement('button', { type: 'button', className: 'les-compare-clear-btn', text: 'Clear' });
+    panel.appendChild(header);
+    panel.appendChild(list);
+    panel.appendChild(openButton);
+    panel.appendChild(clearButton);
 
     panel.querySelector('.les-compare-open-btn').addEventListener('click', openProductComparison);
     panel.querySelector('.les-compare-clear-btn').addEventListener('click', async () => {
@@ -3414,7 +3461,7 @@ function renderComparePanel() {
     }
 
     if (!list) return;
-    list.innerHTML = '';
+    lesReplaceChildren(list);
     comparisonItems.forEach(item => {
         const row = document.createElement('div');
         row.className = 'les-compare-list-item';
@@ -3451,18 +3498,23 @@ function ensureCompareModal() {
 
     const backdrop = document.createElement('div');
     backdrop.className = 'les-compare-modal-backdrop';
-    backdrop.innerHTML = `
-        <div class="les-compare-modal" role="dialog" aria-modal="true" aria-label="Product comparison">
-            <div class="les-compare-modal-header">
-                <div>
-                    <h2>Product comparison</h2>
-                    <p>Selected products side by side with the details that matter for purchasing.</p>
-                </div>
-                <button type="button" class="les-compare-modal-close" aria-label="Close">×</button>
-            </div>
-            <div class="les-compare-modal-body"></div>
-        </div>
-    `;
+    const modal = lesCreateElement(
+        'div',
+        { className: 'les-compare-modal', attrs: { role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Product comparison' } },
+        lesCreateElement(
+            'div',
+            { className: 'les-compare-modal-header' },
+            lesCreateElement(
+                'div',
+                {},
+                lesCreateElement('h2', { text: 'Product comparison' }),
+                lesCreateElement('p', { text: 'Selected products side by side with the details that matter for purchasing.' })
+            ),
+            lesCreateElement('button', { type: 'button', className: 'les-compare-modal-close', text: '×', attrs: { 'aria-label': 'Close' } })
+        ),
+        lesCreateElement('div', { className: 'les-compare-modal-body' })
+    );
+    backdrop.appendChild(modal);
 
     backdrop.addEventListener('click', (event) => {
         if (event.target === backdrop) closeCompareModal();
@@ -3504,12 +3556,15 @@ async function openProductComparison() {
 function renderComparisonLoading(modal) {
     const body = modal.querySelector('.les-compare-modal-body');
     if (!body) return;
-    body.innerHTML = `
-        <div class="les-compare-loading">
-            <div class="lekolar-spinner"></div>
-            <span>Loading product details...</span>
-        </div>
-    `;
+    lesReplaceChildren(
+        body,
+        lesCreateElement(
+            'div',
+            { className: 'les-compare-loading' },
+            lesCreateElement('div', { className: 'lekolar-spinner' }),
+            lesCreateElement('span', { text: 'Loading product details...' })
+        )
+    );
 }
 
 async function resolveComparisonItemDetails(item) {
@@ -3528,7 +3583,7 @@ async function resolveComparisonItemDetails(item) {
 function renderComparisonTable(modal, items) {
     const body = modal.querySelector('.les-compare-modal-body');
     if (!body) return;
-    body.innerHTML = '';
+    lesReplaceChildren(body);
 
     const grid = document.createElement('div');
     grid.className = 'les-compare-grid';
@@ -4032,43 +4087,70 @@ function ensureProductNotePanel(meta) {
     if (!panel) {
         panel = document.createElement('section');
         panel.className = 'les-product-note-panel';
-        panel.innerHTML = `
-            <div class="les-product-note-header">
-                <div>
-                    <strong>Personal notes</strong>
-                    <div class="les-product-note-product"></div>
-                </div>
-                <button type="button" class="les-product-note-close" aria-label="Close note">Close</button>
-            </div>
-            <label class="les-product-note-user-row">
-                <span>User</span>
-                <input type="text" class="les-product-note-user-input" maxlength="80" autocomplete="off" placeholder="Your name">
-            </label>
-            <div class="les-product-note-table-wrap">
-                <table class="les-product-note-table">
-                    <thead>
-                        <tr>
-                            <th class="les-product-note-select-col" title="Delete"></th>
-                            <th>Time/date</th>
-                            <th>User</th>
-                            <th>Note</th>
-                        </tr>
-                    </thead>
-                    <tbody></tbody>
-                </table>
-                <div class="les-product-note-empty">No notes yet.</div>
-            </div>
-            <div class="les-product-note-compose">
-                <input type="text" class="les-product-note-input" maxlength="${PRODUCT_NOTE_MAX_LENGTH}" placeholder="Add one-line note">
-                <button type="button" class="les-product-note-save">Add note</button>
-            </div>
-            <div class="les-product-note-footer">
-                <span class="les-product-note-status"></span>
-                <div class="les-product-note-actions">
-                    <button type="button" class="les-product-note-delete">Delete selected</button>
-                </div>
-            </div>
-        `;
+        const header = lesCreateElement(
+            'div',
+            { className: 'les-product-note-header' },
+            lesCreateElement(
+                'div',
+                {},
+                lesCreateElement('strong', { text: 'Personal notes' }),
+                lesCreateElement('div', { className: 'les-product-note-product' })
+            ),
+            lesCreateElement('button', { type: 'button', className: 'les-product-note-close', text: 'Close', attrs: { 'aria-label': 'Close note' } })
+        );
+        const userNameInput = lesCreateElement('input', {
+            type: 'text',
+            className: 'les-product-note-user-input',
+            attrs: { maxlength: '80', autocomplete: 'off', placeholder: 'Your name' }
+        });
+        const userRow = lesCreateElement(
+            'label',
+            { className: 'les-product-note-user-row' },
+            lesCreateElement('span', { text: 'User' }),
+            userNameInput
+        );
+        const table = lesCreateElement('table', { className: 'les-product-note-table' });
+        const thead = document.createElement('thead');
+        const headRow = document.createElement('tr');
+        headRow.appendChild(lesCreateElement('th', { className: 'les-product-note-select-col', attrs: { title: 'Delete' } }));
+        headRow.appendChild(lesCreateElement('th', { text: 'Time/date' }));
+        headRow.appendChild(lesCreateElement('th', { text: 'User' }));
+        headRow.appendChild(lesCreateElement('th', { text: 'Note' }));
+        thead.appendChild(headRow);
+        table.appendChild(thead);
+        table.appendChild(document.createElement('tbody'));
+        const tableWrap = lesCreateElement(
+            'div',
+            { className: 'les-product-note-table-wrap' },
+            table,
+            lesCreateElement('div', { className: 'les-product-note-empty', text: 'No notes yet.' })
+        );
+        const noteTextInput = lesCreateElement('input', {
+            type: 'text',
+            className: 'les-product-note-input',
+            attrs: { maxlength: PRODUCT_NOTE_MAX_LENGTH, placeholder: 'Add one-line note' }
+        });
+        const compose = lesCreateElement(
+            'div',
+            { className: 'les-product-note-compose' },
+            noteTextInput,
+            lesCreateElement('button', { type: 'button', className: 'les-product-note-save', text: 'Add note' })
+        );
+        const footer = lesCreateElement(
+            'div',
+            { className: 'les-product-note-footer' },
+            lesCreateElement('span', { className: 'les-product-note-status' }),
+            lesCreateElement(
+                'div',
+                { className: 'les-product-note-actions' },
+                lesCreateElement('button', { type: 'button', className: 'les-product-note-delete', text: 'Delete selected' })
+            )
+        );
+        panel.appendChild(header);
+        panel.appendChild(userRow);
+        panel.appendChild(tableWrap);
+        panel.appendChild(compose);
+        panel.appendChild(footer);
 
         const buttonsBar = ensureProductActionBar();
         if (buttonsBar && buttonsBar.parentElement) {
@@ -4615,11 +4697,11 @@ function renderSwedishReferenceError(panel, message) {
     if (status) status.textContent = message || 'Could not load Swedish reference.';
     if (body) {
         body.hidden = true;
-        body.innerHTML = '';
+        lesReplaceChildren(body);
     }
     if (actions) {
         actions.hidden = true;
-        actions.innerHTML = '';
+        lesReplaceChildren(actions);
     }
 }
 
@@ -5761,11 +5843,29 @@ function isPriceAdjustmentCandidate(element) {
     return Boolean(findNordicPriceMatch(text));
 }
 
+function storePriceAdjustmentOriginalContent(element) {
+    if (!priceAdjustmentOriginalNodes.has(element)) {
+        priceAdjustmentOriginalNodes.set(
+            element,
+            Array.from(element.childNodes || []).map(node => node.cloneNode(true))
+        );
+    }
+}
+
+function restorePriceAdjustmentContent(element) {
+    const originalNodes = priceAdjustmentOriginalNodes.get(element);
+    if (originalNodes && originalNodes.length) {
+        lesReplaceChildren(element, ...originalNodes.map(node => node.cloneNode(true)));
+        return;
+    }
+    if (element.dataset.lesOriginalPriceText !== undefined) {
+        element.textContent = element.dataset.lesOriginalPriceText;
+    }
+}
+
 function restorePriceAdjustmentElement(element) {
     if (!element || element.nodeType !== 1) return;
-    if (element.dataset.lesOriginalPriceHtml !== undefined) {
-        element.innerHTML = element.dataset.lesOriginalPriceHtml;
-    }
+    restorePriceAdjustmentContent(element);
     element.classList.remove('les-price-adjusted');
     element.style.removeProperty('--les-price-adjustment-color');
     delete element.dataset.lesOriginalPriceText;
@@ -5823,17 +5923,15 @@ function applyPriceAdjustmentToElement(element, config) {
 
     if (element.dataset.lesOriginalPriceText === undefined) {
         element.dataset.lesOriginalPriceText = element.textContent || '';
-        element.dataset.lesOriginalPriceHtml = element.innerHTML || '';
         element.dataset.lesOriginalPriceTitle = element.getAttribute('title') || '';
+        storePriceAdjustmentOriginalContent(element);
     }
 
     const originalText = element.dataset.lesOriginalPriceText;
     const adjusted = buildAdjustedPriceText(originalText, config.percent);
     if (!adjusted) return;
 
-    if (element.dataset.lesOriginalPriceHtml !== undefined) {
-        element.innerHTML = element.dataset.lesOriginalPriceHtml;
-    }
+    restorePriceAdjustmentContent(element);
     if (!writeAdjustedPriceText(element, originalText, adjusted.text, config.percent)) return;
 
     element.classList.add('les-price-adjusted');
@@ -5963,7 +6061,7 @@ async function performPriceSort(order, gridContainer) {
             originalGridContent = Array.from(gridContainer.children);
         }
         
-        gridContainer.innerHTML = '';
+        lesReplaceChildren(gridContainer);
         allSortedCards.forEach(card => gridContainer.appendChild(card));
         
         overlay.style.display = 'none';
@@ -6014,11 +6112,16 @@ function initPriceSorting() {
     const select = document.createElement('select');
     select.id = 'lekolar-price-sort';
     select.className = 'lekolar-sort-select';
-    select.innerHTML = `
-        <option value="">Default</option>
-        <option value="asc">Price: Low to High</option>
-        <option value="desc">Price: High to Low</option>
-    `;
+    [
+        { value: '', label: 'Default' },
+        { value: 'asc', label: 'Price: Low to High' },
+        { value: 'desc', label: 'Price: High to Low' }
+    ].forEach(optionConfig => {
+        const option = document.createElement('option');
+        option.value = optionConfig.value;
+        option.textContent = optionConfig.label;
+        select.appendChild(option);
+    });
     
     container.appendChild(label);
     container.appendChild(select);

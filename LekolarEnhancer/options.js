@@ -12,6 +12,24 @@ const PRODUCT_NOTE_MAX_LENGTH = 5000;
 
 let lesSettings = lesMergeSettings(null);
 
+function lesReplaceChildren(element, ...children) {
+    if (!element) return;
+    while (element.firstChild) element.removeChild(element.firstChild);
+    children.forEach(child => {
+        if (child === null || child === undefined) return;
+        element.appendChild(typeof child === 'string' ? document.createTextNode(child) : child);
+    });
+}
+
+function lesCreateSafeLink(url, text) {
+    const link = document.createElement('a');
+    link.href = url;
+    link.target = '_blank';
+    link.rel = 'noopener';
+    link.textContent = text;
+    return link;
+}
+
 // =====================================================================
 // Tab navigation
 // =====================================================================
@@ -373,7 +391,7 @@ function lesPersistFormat(slot) {
 
 function lesRenderTokens(card, fmt) {
     const wrap = card.querySelector('[data-format-tokens]');
-    wrap.innerHTML = '';
+    lesReplaceChildren(wrap);
     wrap.classList.toggle('empty', !fmt.tokens.length);
     fmt.tokens.forEach((token, idx) => {
         const chip = document.createElement('span');
@@ -465,7 +483,7 @@ function lesRenderPreview(card, fmt) {
     const txt = lesRenderCopyFormat(fmt, ctx);
     const out = card.querySelector('[data-format-preview]');
     if (fmt.asLink && ctx.url) {
-        out.innerHTML = `<a href="${lesEscapeHtmlForCopy(ctx.url)}" target="_blank" rel="noopener">${lesEscapeHtmlForCopy(txt || '(empty)')}</a>`;
+        lesReplaceChildren(out, lesCreateSafeLink(ctx.url, txt || '(empty)'));
     } else {
         out.textContent = txt || '(empty)';
     }
@@ -569,7 +587,7 @@ function lesGetProductCardLinkFormat() {
 function lesRenderProductCardLinkTokens() {
     const wrap = document.getElementById('productCardPptLinkTokens');
     const fmt = lesGetProductCardLinkFormat();
-    wrap.innerHTML = '';
+    lesReplaceChildren(wrap);
     wrap.classList.toggle('empty', !fmt.tokens.length);
 
     fmt.tokens.forEach((token, idx) => {
@@ -671,7 +689,7 @@ function lesRenderProductCardLinkPreview() {
     const fmt = lesGetProductCardLinkFormat();
     const txt = lesRenderCopyFormat(fmt, ctx) || ctx.url;
     const out = document.getElementById('productCardPptLinkPreview');
-    out.innerHTML = `<a href="${lesEscapeHtmlForCopy(ctx.url)}" target="_blank" rel="noopener">${lesEscapeHtmlForCopy(txt)}</a>`;
+    lesReplaceChildren(out, lesCreateSafeLink(ctx.url, txt));
 }
 
 function lesWireProductCardPpt() {
@@ -981,7 +999,7 @@ function lesWireAi() {
         pendingUrl = url || '';
         const cat = extracted.category && extracted.category !== '_default' ? ` [${extracted.category}]` : '';
         aiPreviewQuery.textContent = (extracted.query || '(no query)') + cat;
-        aiPreviewChips.innerHTML = '';
+        lesReplaceChildren(aiPreviewChips);
         const entries = Object.entries(extracted.filters || {});
         if (!entries.length) {
             const c = document.createElement('span'); c.className = 'ai-chip'; c.textContent = 'no filters';
@@ -1047,8 +1065,11 @@ function lesPaintAiHistory() {
     if (!wrap) return;
     chrome.storage.local.get(AI_HISTORY_KEY, (data) => {
         const list = Array.isArray(data[AI_HISTORY_KEY]) ? data[AI_HISTORY_KEY] : [];
-        if (!list.length) { wrap.innerHTML = ''; return; }
-        wrap.innerHTML = '<div class="ai-history-title">Recent queries</div>';
+        if (!list.length) { lesReplaceChildren(wrap); return; }
+        const title = document.createElement('div');
+        title.className = 'ai-history-title';
+        title.textContent = 'Recent queries';
+        lesReplaceChildren(wrap, title);
         list.forEach(item => {
             const row = document.createElement('div');
             row.className = 'ai-history-item';
@@ -1353,7 +1374,7 @@ async function lesLoadChangelog() {
     try {
         const url = chrome.runtime.getURL('CHANGELOG.md');
         const text = await fetch(url).then(r => r.text());
-        target.innerHTML = lesRenderChangelog(text);
+        lesReplaceChildren(target, lesRenderChangelog(text));
     } catch (e) {
         target.textContent = `Could not load CHANGELOG.md: ${e.message || e}`;
     }
@@ -1363,50 +1384,67 @@ async function lesLoadChangelog() {
 // "_(yyyy-mm-dd)_" date suffix, "- bullet" lists, `inline code`.
 function lesRenderChangelog(md) {
     const lines = md.split(/\r?\n/);
-    const out = [];
-    let inList = false;
-    const flush = () => { if (inList) { out.push('</ul>'); inList = false; } };
+    const fragment = document.createDocumentFragment();
+    let currentList = null;
+    const flush = () => { currentList = null; };
     for (const raw of lines) {
         const line = raw.trimEnd();
         if (!line.trim()) { flush(); continue; }
         const h2 = line.match(/^##\s+(.+)$/);
         if (h2) {
             flush();
+            const heading = document.createElement('h2');
             const dateMatch = h2[1].match(/^(.+?)\s*[—-]\s*(\d{4}-\d{2}-\d{2})\s*$/);
             if (dateMatch) {
-                out.push(`<h2>${lesEscapeHtml(dateMatch[1])}<span class="release-date">${lesEscapeHtml(dateMatch[2])}</span></h2>`);
+                heading.appendChild(document.createTextNode(dateMatch[1]));
+                const date = document.createElement('span');
+                date.className = 'release-date';
+                date.textContent = dateMatch[2];
+                heading.appendChild(date);
             } else {
-                out.push(`<h2>${lesEscapeHtml(h2[1])}</h2>`);
+                heading.textContent = h2[1];
             }
+            fragment.appendChild(heading);
             continue;
         }
         if (line.startsWith('# ')) {
             flush();
-            out.push(`<h2>${lesEscapeHtml(line.slice(2))}</h2>`);
+            const heading = document.createElement('h2');
+            heading.textContent = line.slice(2);
+            fragment.appendChild(heading);
             continue;
         }
         if (/^\s*-\s+/.test(line)) {
-            if (!inList) { out.push('<ul>'); inList = true; }
+            if (!currentList) {
+                currentList = document.createElement('ul');
+                fragment.appendChild(currentList);
+            }
             const item = line.replace(/^\s*-\s+/, '');
-            out.push(`<li>${lesInline(item)}</li>`);
+            const li = document.createElement('li');
+            lesAppendInlineMarkdown(li, item);
+            currentList.appendChild(li);
             continue;
         }
         flush();
-        out.push(`<p>${lesInline(line)}</p>`);
+        const paragraph = document.createElement('p');
+        lesAppendInlineMarkdown(paragraph, line);
+        fragment.appendChild(paragraph);
     }
     flush();
-    return out.join('\n');
+    return fragment;
 }
 
-function lesInline(s) {
-    return lesEscapeHtml(s).replace(/`([^`]+)`/g, '<code>$1</code>');
-}
-
-function lesEscapeHtml(s) {
-    return String(s == null ? '' : s)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;');
+function lesAppendInlineMarkdown(target, value) {
+    String(value == null ? '' : value).split(/(`[^`]+`)/g).forEach(part => {
+        if (!part) return;
+        if (part.startsWith('`') && part.endsWith('`') && part.length > 1) {
+            const code = document.createElement('code');
+            code.textContent = part.slice(1, -1);
+            target.appendChild(code);
+        } else {
+            target.appendChild(document.createTextNode(part));
+        }
+    });
 }
 
 async function lesLoadReadme() {

@@ -65,7 +65,7 @@ The extension injects utility buttons directly into the product page DOM to faci
 
 - **Location**: Product page action bar.
 - **Action**: Creates a product-card PowerPoint file from the current product details and image.
-- **Runtime assets**: Uses the vendored `pptxgenjs` bundle shipped inside the extension package.
+- **Runtime assets**: Uses the vendored `pptxgenjs` bundle shipped inside the extension package, with legacy eval-like polyfill fallbacks disabled for store validation.
 
 **8. Omnibox and SharePoint Search**
 
@@ -95,6 +95,7 @@ The background worker blocks `lesAiSearch`, `lesAiTestKey`, and `lesTranslateTex
   - Uses a `MutationObserver` to handle dynamic content loading (e.g., when switching variants).
   - Uses `XPath` and `querySelector` to robustly locate product numbers and titles, even if the DOM structure varies slightly.
   - Implements the `Clipboard API` (`navigator.clipboard.write`) for writing both `text/plain` and `text/html` mime types.
+  - Builds extension-owned UI with DOM APIs (`createElement`, `textContent`, cloned nodes) instead of raw HTML assignment.
 - **Styling (`style.css`)**:
   - Scoped CSS classes (`.lekolar-copy-btn`) to avoid conflicts.
   - Matches the site's aesthetic (hover effects, cursor pointers).

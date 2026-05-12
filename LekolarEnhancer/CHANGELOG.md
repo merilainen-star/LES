@@ -1,5 +1,10 @@
 # What's new
 
+## v1.28 - 2026-05-12
+
+- **AMO warning cleanup** removes raw HTML rendering from extension-owned UI and disables legacy eval-like fallbacks in the vendored PowerPoint runtime.
+- **Safer price simulation restore** now keeps original price DOM nodes in memory instead of storing and replaying raw HTML strings.
+
 ## v1.27 - 2026-05-12
 
 - **External services consent** is now required before AI Search, AI provider key tests, or Swedish source translation can send text to third-party services.
