@@ -4,7 +4,7 @@ Looking at the structure of `PimData.json`, it maps perfectly to the URL facet p
 
 Here is the master mapping of the secret PIM data properties to Lekolar URL `?facet=` parameters:
 
-### 1. Dimensional Properties (Suffix: `_cm`)
+**1. Dimensional Properties (Suffix: `_cm`)**
 *   `Length` → `itemLength_cm`
 *   `Width` → `itemWidth_cm`
 *   `Height` → `itemHeight_cm`
@@ -12,7 +12,7 @@ Here is the master mapping of the secret PIM data properties to Lekolar URL `?fa
 *   `Diameter` → `itemDiameter_cm`
 *   `SeatHeight` → `itemseatheight_cm`
 
-### 2. Product Attributes (Prefix: `item`)
+**2. Product Attributes (Prefix: `item`)**
 *   `ItemColorText` → `itemcolortext`
 *   `MaterialFurniture` → `itemmaterialfurniture`
 *   `LegMaterial` → `itemlegmaterial`
@@ -20,16 +20,16 @@ Here is the master mapping of the secret PIM data properties to Lekolar URL `?fa
 *   `HeightAdjustable` → `itemheightadjustable`
 *   `IsStackable` → `itemisstackable`  *(implied pattern)*
 
-### 3. Color Codes (Suffix: `cvl`)
+**3. Color Codes (Suffix: `cvl`)**
 *   `ColorCodeNCS` → `itemcolorcodencscvl`
 *   `ColorCodeRAL` → `itemcolorcoderalcvl`
 
-### 4. Direct Name Matches / Core Filters
+**4. Direct Name Matches / Core Filters**
 *   `EcoLabelling` → `prodecolabelling`
 *   `ToxicFreeSymbolsEnhanced` → `toxicfree`
 *   `AgeGroups` → `grades`
 
 ---
 
-### How we can use this in LekolarEnhancer
+**How we can use this in LekolarEnhancer**
 Because the PIM data structure exposes exactly how the backend search works, you can build a feature in your extension that dynamically generates deep-links. For example, if you know a product has a specific PIM attribute, you can programmatically construct the filter URL by applying the PIM-to-URL naming rules (e.g. `facet=item${PimKey.toLowerCase()}`).

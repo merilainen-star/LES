@@ -1,0 +1,37 @@
+#!/bin/sh
+set -eu
+
+if ! command -v node >/dev/null 2>&1; then
+    echo "Feature docs check failed: Node.js is required to run scripts/check-feature-docs.js." >&2
+    exit 1
+fi
+
+zero="0000000000000000000000000000000000000000"
+status=0
+remote_name="${1:-origin}"
+
+while read local_ref local_sha remote_ref remote_sha
+do
+    if [ "$local_sha" = "$zero" ]; then
+        continue
+    fi
+
+    if [ "$remote_sha" = "$zero" ]; then
+        default_remote_head="$(git symbolic-ref --quiet --short "refs/remotes/$remote_name/HEAD" 2>/dev/null || true)"
+        if [ -n "$default_remote_head" ]; then
+            base_sha="$(git merge-base "$local_sha" "$default_remote_head" 2>/dev/null || true)"
+        else
+            base_sha=""
+        fi
+
+        if [ -n "$base_sha" ]; then
+            node scripts/check-feature-docs.js --range "$base_sha..$local_sha" || status=$?
+        else
+            node scripts/check-feature-docs.js --range "$local_sha" || status=$?
+        fi
+    else
+        node scripts/check-feature-docs.js --range "$remote_sha..$local_sha" || status=$?
+    fi
+done
+
+exit "$status"

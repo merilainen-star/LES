@@ -30,6 +30,18 @@ const LES_DEFAULT_FORMATS = {
     }
 };
 
+const LES_DEFAULT_PRODUCT_CARD_PPT_SETTINGS = {
+    bannerColor: '#B5121B',
+    labels: {
+        item: 'Item',
+        description: 'Description',
+        specifications: 'Specifications'
+    },
+    linkFormat: {
+        tokens: [{ type: 'url' }]
+    }
+};
+
 const LES_DEFAULT_SETTINGS = {
     // Master switch
     extensionEnabled: true,
@@ -39,9 +51,15 @@ const LES_DEFAULT_SETTINGS = {
     infiniteScroll: true,
     copyButtons: true,
     hideEnvironmentalLogo: false,
+    productLayoutDivider: true,
+    priceAdjustmentEnabled: false,
+    priceAdjustmentPercent: 0,
+    priceAdjustmentHighlightColor: '#fff3bf',
+    productCardPpt: LES_DEFAULT_PRODUCT_CARD_PPT_SETTINGS,
     // Copy format presets bound to modifier slots
     modifierKey: 'shiftKey',
-    secondaryModifierKey: 'altKey',
+    secondaryModifierKey: 'ctrlKey',
+    copyShortcutAltDefaultMigrated: true,
     copyFormats: LES_DEFAULT_FORMATS,
     // Omnibox configuration (preferred country + per-country base URLs)
     countries: {
@@ -52,6 +70,7 @@ const LES_DEFAULT_SETTINGS = {
     },
     // Beta features (AI search)
     aiBetaEnabled: false,
+    externalServicesConsent: false,
     aiProvider: 'openai',
     aiModels: { openai: '', anthropic: '', gemini: '' },
     aiAdvanced: { temperature: 0, maxTokens: 600 },
@@ -76,6 +95,37 @@ function lesCloneFormat(fmt) {
             ))
             : []
     };
+}
+
+function lesCloneProductCardPptSettings(raw) {
+    const out = JSON.parse(JSON.stringify(LES_DEFAULT_PRODUCT_CARD_PPT_SETTINGS));
+    if (!raw || typeof raw !== 'object') return out;
+
+    if (typeof raw.bannerColor === 'string' && /^#[0-9a-f]{6}$/i.test(raw.bannerColor.trim())) {
+        out.bannerColor = raw.bannerColor.trim();
+    }
+
+    if (raw.labels && typeof raw.labels === 'object') {
+        ['item', 'description', 'specifications'].forEach(key => {
+            if (typeof raw.labels[key] === 'string' && raw.labels[key].trim()) {
+                out.labels[key] = raw.labels[key].trim().slice(0, 40);
+            }
+        });
+    }
+
+    const linkFormat = raw.linkFormat && typeof raw.linkFormat === 'object'
+        ? raw.linkFormat
+        : {};
+    const clonedLink = lesCloneFormat({
+        label: '',
+        asLink: false,
+        tokens: linkFormat.tokens
+    });
+    if (clonedLink && clonedLink.tokens.length > 0) {
+        out.linkFormat.tokens = clonedLink.tokens;
+    }
+
+    return out;
 }
 
 // Merge stored settings on top of defaults, surviving renames and partial writes.
@@ -103,6 +153,8 @@ function lesMergeSettings(stored) {
                     out.copyFormats[slot] = cloned;
                 }
             }
+        } else if (key === 'productCardPpt') {
+            out.productCardPpt = lesCloneProductCardPptSettings(stored.productCardPpt);
         } else if (key === 'aiModels') {
             for (const p of ['openai', 'anthropic', 'gemini']) {
                 if (typeof stored.aiModels[p] === 'string') {
@@ -119,6 +171,10 @@ function lesMergeSettings(stored) {
         } else {
             out[key] = stored[key];
         }
+    }
+    if (stored.secondaryModifierKey === 'altKey' && stored.copyShortcutAltDefaultMigrated !== true) {
+        out.secondaryModifierKey = 'ctrlKey';
+        out.copyShortcutAltDefaultMigrated = true;
     }
     return out;
 }
@@ -162,10 +218,12 @@ function lesCountryForHost(host) {
 if (typeof globalThis !== 'undefined') {
     globalThis.LES_DEFAULT_SETTINGS = LES_DEFAULT_SETTINGS;
     globalThis.LES_DEFAULT_FORMATS = LES_DEFAULT_FORMATS;
+    globalThis.LES_DEFAULT_PRODUCT_CARD_PPT_SETTINGS = LES_DEFAULT_PRODUCT_CARD_PPT_SETTINGS;
     globalThis.LES_COUNTRY_CODES = LES_COUNTRY_CODES;
     globalThis.lesMergeSettings = lesMergeSettings;
     globalThis.lesRenderCopyFormat = lesRenderCopyFormat;
     globalThis.lesEscapeHtmlForCopy = lesEscapeHtmlForCopy;
     globalThis.lesCountryForHost = lesCountryForHost;
     globalThis.lesCloneFormat = lesCloneFormat;
+    globalThis.lesCloneProductCardPptSettings = lesCloneProductCardPptSettings;
 }

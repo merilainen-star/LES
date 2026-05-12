@@ -23,8 +23,9 @@
       <nav class="sidebar-nav" id="sidebarNav">
         <button type="button" class="nav-item" data-tab="general">General</button>
         <button type="button" class="nav-item" data-tab="copy">Copy format</button>
+        <button type="button" class="nav-item" data-tab="product-card">Product card</button>
         <button type="button" class="nav-item" data-tab="omnibox">Omnibox</button>
-        <button type="button" class="nav-item beta-only hidden" data-tab="ai">AI Search <span class="beta-pill">BETA</span></button>
+        <button type="button" class="nav-item beta-only" data-tab="ai">AI Search <span class="beta-pill">BETA</span></button>
         <button type="button" class="nav-item" data-tab="advanced">Advanced</button>
         <button type="button" class="nav-item" data-tab="whatsnew">
           What's new
@@ -73,6 +74,33 @@
               <span class="slider"></span>
             </div>
           </label>
+          <label class="toggle-row">
+            <span class="toggle-label">Draggable product details divider</span>
+            <div class="toggle-switch">
+              <input type="checkbox" id="productLayoutDivider" checked>
+              <span class="slider"></span>
+            </div>
+          </label>
+        </div>
+
+        <div class="card price-simulation-card" id="priceSimulationCard">
+          <h3>Price simulation</h3>
+          <p class="hint">Adjust displayed prices by a percent for discount or markup testing. Active simulated prices are highlighted and labeled on the page.</p>
+          <label class="toggle-row">
+            <span class="toggle-label">Enable price simulation</span>
+            <div class="toggle-switch">
+              <input type="checkbox" id="priceAdjustmentEnabled">
+              <span class="slider"></span>
+            </div>
+          </label>
+          <div class="kv-row">
+            <label class="kv-label" for="priceAdjustmentPercent">Adjustment %</label>
+            <input type="number" id="priceAdjustmentPercent" class="text-input narrow-input" min="-100" max="500" step="0.1">
+          </div>
+          <div class="kv-row">
+            <label class="kv-label" for="priceAdjustmentHighlightColor">Highlight color</label>
+            <input type="color" id="priceAdjustmentHighlightColor" class="color-input" value="#fff3bf">
+          </div>
         </div>
 
         <div class="card">
@@ -104,6 +132,19 @@
             </div>
           </label>
         </div>
+
+        <div class="card">
+          <h3>External services</h3>
+          <p class="hint">AI Search sends the typed query to the AI provider you select. Swedish reference translation sends source text to MyMemory. These features stay off until you allow external data transmission.</p>
+          <label class="toggle-row">
+            <span class="toggle-label">Allow AI and translation requests</span>
+            <div class="toggle-switch">
+              <input type="checkbox" id="externalServicesConsent">
+              <span class="slider"></span>
+            </div>
+          </label>
+          <p id="externalServicesConsentStatus" class="hint status-line">External services are off.</p>
+        </div>
       </section>
 
       <!-- ============== COPY FORMAT ============== -->
@@ -131,9 +172,9 @@
             <label class="kv-label">Secondary modifier</label>
             <div class="select-row">
               <select id="secondaryModifierKey">
-                <option value="altKey">Alt</option>
-                <option value="shiftKey">Shift</option>
                 <option value="ctrlKey">Ctrl</option>
+                <option value="shiftKey">Shift</option>
+                <option value="altKey">Alt</option>
                 <option value="none">— none —</option>
               </select>
             </div>
@@ -199,7 +240,7 @@
         </div>
 
         <div class="card format-card" data-format-slot="secondary">
-          <h3>Secondary modifier <span class="slot-hint" id="secondarySlotHint">(Alt + click)</span></h3>
+          <h3>Secondary modifier <span class="slot-hint" id="secondarySlotHint">(Ctrl + click)</span></h3>
           <div class="format-row">
             <label class="kv-label">Label</label>
             <input type="text" class="text-input" data-format-label placeholder="Number + name" maxlength="40">
@@ -231,6 +272,59 @@
           <h3>Reset</h3>
           <p class="hint">Restore the three default presets (Default / With link / Number + name).</p>
           <button id="resetFormatsBtn" type="button" class="primary-btn danger-btn">Reset copy formats</button>
+        </div>
+      </section>
+
+      <!-- ============== PRODUCT CARD PPT ============== -->
+      <section class="tab-panel" data-tab-panel="product-card">
+        <h2 class="panel-title">Product card PPT</h2>
+        <p class="panel-sub">Customize the one-slide product card generated from product pages.</p>
+
+        <div class="card">
+          <h3>Appearance</h3>
+          <div class="kv-row">
+            <label class="kv-label" for="productCardPptBannerColor">Top banner color</label>
+            <input type="color" id="productCardPptBannerColor" class="color-input" value="#B5121B">
+            <input type="text" id="productCardPptBannerHex" class="text-input narrow-input" maxlength="7" placeholder="#B5121B">
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>Field labels</h3>
+          <div class="kv-row">
+            <label class="kv-label" for="productCardPptItemLabel">Item</label>
+            <input type="text" id="productCardPptItemLabel" class="text-input" maxlength="40" placeholder="Item">
+          </div>
+          <div class="kv-row">
+            <label class="kv-label" for="productCardPptDescriptionLabel">Description</label>
+            <input type="text" id="productCardPptDescriptionLabel" class="text-input" maxlength="40" placeholder="Description">
+          </div>
+          <div class="kv-row">
+            <label class="kv-label" for="productCardPptSpecificationsLabel">Specifications</label>
+            <input type="text" id="productCardPptSpecificationsLabel" class="text-input" maxlength="40" placeholder="Specifications">
+          </div>
+        </div>
+
+        <div class="card product-card-link-card">
+          <h3>Product URL link text</h3>
+          <p class="hint">The generated text is shown at the bottom of the slide and still links to the product page.</p>
+          <div class="format-tokens" id="productCardPptLinkTokens"></div>
+          <div class="format-actions">
+            <div class="token-add-group">
+              <button type="button" class="primary-btn secondary-btn small-btn" data-product-card-link-token="number">+ {number}</button>
+              <button type="button" class="primary-btn secondary-btn small-btn" data-product-card-link-token="name">+ {name}</button>
+              <button type="button" class="primary-btn secondary-btn small-btn" data-product-card-link-token="url">+ {url}</button>
+              <button type="button" class="primary-btn secondary-btn small-btn" data-product-card-link-token="value">+ {value}</button>
+              <button type="button" class="primary-btn small-btn" id="productCardPptAddLinkText">+ Text…</button>
+            </div>
+          </div>
+          <div class="format-preview">
+            <span class="preview-label">Preview:</span>
+            <span class="preview-text" id="productCardPptLinkPreview"></span>
+          </div>
+          <div class="key-actions">
+            <button id="resetProductCardPptBtn" type="button" class="primary-btn danger-btn">Reset product card settings</button>
+          </div>
         </div>
       </section>
 
@@ -405,6 +499,21 @@
         </div>
 
         <div class="card">
+          <h3>Personal product notes</h3>
+          <p class="hint">Export or import the local notes saved from product pages. These notes stay on this computer unless you move them with JSON.</p>
+          <div class="notes-summary">
+            <span id="notesCount">0 saved</span>
+            <span class="hint">Stored locally in this browser profile.</span>
+          </div>
+          <div class="key-actions">
+            <button id="exportNotesBtn" type="button" class="primary-btn secondary-btn">Export notes</button>
+            <button id="importNotesBtn" type="button" class="primary-btn">Import notes</button>
+            <input type="file" id="importNotesFile" accept="application/json,.json" class="hidden">
+          </div>
+          <div id="notesStatus" class="hint status-line"></div>
+        </div>
+
+        <div class="card">
           <h3>Reset everything</h3>
           <p class="hint warn-note">Wipes all settings (including copy formats and country list) and restores defaults. API keys are not affected.</p>
           <button id="resetAllBtn" type="button" class="primary-btn danger-btn">Reset to defaults</button>
@@ -425,15 +534,24 @@
         <h2 class="panel-title">About</h2>
         <p class="panel-sub">Lekolar Enhancer — extra UX for Lekolar.fi/se/no/dk.</p>
         <div class="card">
+          <h3>Firefox Add-ons</h3>
+          <p class="hint">Open the Firefox add-on page on Mozilla Add-ons.</p>
+          <a class="primary-btn about-store-link" href="https://addons.mozilla.org/en-US/developers/addon/778ccbb63fa64c838515/edit" target="_blank" rel="noopener">Open Firefox Add-ons page</a>
+        </div>
+        <div class="card">
           <div class="about-grid">
             <div class="about-row"><span class="about-key">Version</span><span id="aboutVersion"></span></div>
-            <div class="about-row"><span class="about-key">Author</span><span>Antigravity</span></div>
-            <div class="about-row"><span class="about-key">Source</span><span><a href="https://github.com/antigravity-fi/LekolarEnhancer" target="_blank" rel="noopener">github.com/antigravity-fi/LekolarEnhancer</a></span></div>
+            <div class="about-row"><span class="about-key">Author</span><span>Mikko Meriläinen</span></div>
           </div>
         </div>
         <div class="card">
           <h3>README</h3>
           <div id="readmeContent" class="readme">Loading…</div>
+        </div>
+        <div class="card">
+          <h3>Source</h3>
+          <p class="hint">Development repository on GitHub.</p>
+          <a class="about-source-link" href="https://github.com/merilainen-star/LES" target="_blank" rel="noopener">github.com/merilainen-star/LES</a>
         </div>
       </section>
 

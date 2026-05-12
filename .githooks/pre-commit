@@ -1,0 +1,9 @@
+#!/bin/sh
+set -eu
+
+if ! command -v node >/dev/null 2>&1; then
+    echo "Feature docs check failed: Node.js is required to run scripts/check-feature-docs.js." >&2
+    exit 1
+fi
+
+node scripts/check-feature-docs.js --staged

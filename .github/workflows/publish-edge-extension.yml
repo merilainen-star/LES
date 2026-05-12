@@ -8,6 +8,8 @@ on:
       - 'LekolarEnhancer-Edge/**'
       - 'sync-edge-variant.ps1'
       - 'VERSIONING.md'
+      - 'scripts/**'
+      - '.github/workflows/publish-edge-extension.yml'
 
 jobs:
   # ── 1. Detect changed targets and read release version ────────────────────
@@ -25,6 +27,14 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Check feature documentation
+        run: |
+          if [ "${{ github.event.before }}" = "0000000000000000000000000000000000000000" ]; then
+            node scripts/check-feature-docs.js --range "${{ github.sha }}"
+          else
+            node scripts/check-feature-docs.js --range "${{ github.event.before }}..${{ github.event.after }}"
+          fi
+
       - name: Detect which folders changed
         id: detect
         run: |
@@ -34,9 +44,9 @@ jobs:
             CHANGED=$(git diff --name-only HEAD~1 HEAD)
           fi
           echo "$CHANGED"
-          echo "firefox_changed=$(echo "$CHANGED" | grep -q '^LekolarEnhancer/' && echo true || echo false)" >> $GITHUB_OUTPUT
-          # Treat changes in either Firefox or Edge source as a signal to publish Edge
-          echo "edge_changed=$(echo "$CHANGED" | grep -Eq '^(LekolarEnhancer/|LekolarEnhancer-Edge/)' && echo true || echo false)" >> $GITHUB_OUTPUT
+          echo "firefox_changed=$(echo "$CHANGED" | grep -Eq '^(LekolarEnhancer/|scripts/(build-extension-packages|check-extension-packages)\.js)' && echo true || echo false)" >> $GITHUB_OUTPUT
+          # Treat shared source, Edge source, Edge sync, and package tooling as Edge release signals.
+          echo "edge_changed=$(echo "$CHANGED" | grep -Eq '^(LekolarEnhancer/|LekolarEnhancer-Edge/|sync-edge-variant\.ps1|scripts/(build-extension-packages|check-extension-packages)\.js|scripts/build-edge-zip\.ps1)' && echo true || echo false)" >> $GITHUB_OUTPUT
 
       - name: Read release version from manifest
         id: version
@@ -44,10 +54,6 @@ jobs:
           RELEASE_VERSION=$(python3 -c "import json; print(json.load(open('LekolarEnhancer/manifest.json'))['version'])")
           echo "Release version: $RELEASE_VERSION"
           echo "release_version=$RELEASE_VERSION" >> $GITHUB_OUTPUT
-
-      - name: Sync Edge variant from Firefox source
-        shell: pwsh
-        run: ./sync-edge-variant.ps1
 
   # ── 2a. Publish to Firefox AMO ─────────────────────────────────────────────
   publish-firefox:
@@ -67,13 +73,21 @@ jobs:
         with:
           node-version: '20'
 
+      - name: Build clean release packages
+        run: |
+          node scripts/build-extension-packages.js
+          node scripts/check-extension-packages.js
+
       - name: Install web-ext
         run: npm install -g web-ext
+
+      - name: Lint Firefox package
+        run: web-ext lint --source-dir ./dist/firefox
 
       - name: Sign & upload to AMO
         run: |
           web-ext sign \
-            --source-dir ./LekolarEnhancer \
+            --source-dir ./dist/firefox \
             --channel unlisted \
             --api-key    "${{ secrets.FIREFOX_API_ISSUER }}" \
             --api-secret "${{ secrets.FIREFOX_API_SECRET }}" \
@@ -96,12 +110,38 @@ jobs:
         with:
           ref: ${{ github.sha }}
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Sync Edge variant from Firefox source
+        shell: pwsh
+        run: ./sync-edge-variant.ps1
+
+      - name: Build clean release packages
+        run: |
+          node scripts/build-extension-packages.js
+          node scripts/check-extension-packages.js
+
       - name: Create extension ZIP
         run: |
           set -euo pipefail
-          cd LekolarEnhancer-Edge
-          zip -r ../edge-extension.zip . --exclude "*.git*" --exclude "*.DS_Store"
-          echo "ZIP created: $(du -sh ../edge-extension.zip | cut -f1)"
+          rm -f edge-extension.zip
+          cd dist/edge
+          zip -r ../../edge-extension.zip . --exclude "*.git*" --exclude "*.DS_Store"
+          cd ../..
+          echo "ZIP created: $(du -sh edge-extension.zip | cut -f1)"
+
+      - name: Smoke-check Edge ZIP
+        run: |
+          set -euo pipefail
+          unzip -l edge-extension.zip
+          unzip -l edge-extension.zip | grep -Eq '[[:space:]]manifest\.json$'
+          if unzip -l edge-extension.zip | grep -Eq '(^|[[:space:]/])(test\.html|test_facets\.js|manifest-chrome\.json|_push_image_copy)(/|$)'; then
+            echo "Forbidden development artifact found in Edge ZIP."
+            exit 1
+          fi
 
       - name: Upload package to Edge
         id: upload

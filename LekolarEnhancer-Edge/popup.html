@@ -13,10 +13,21 @@
     <div class="popup-header">
       <img src="logo.png" alt="Logo" class="header-logo">
       <div class="header-text">
-        <h1>Lekolar Enhancer</h1>
+        <div class="header-title-row">
+          <h1>Lekolar Enhancer</h1>
+          <button id="shareAddonBtn" class="share-addon-btn" type="button" aria-label="Copy Edge Add-ons link" title="Copy Edge Add-ons link">
+            <svg viewBox="0 0 24 24" class="share-icon" aria-hidden="true">
+              <path d="M8.2 12.4 15.8 7.7M8.2 11.6l7.6 4.7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" fill="none"/>
+              <circle cx="6" cy="12" r="2.4" fill="none" stroke="currentColor" stroke-width="1.8"/>
+              <circle cx="18" cy="6.5" r="2.4" fill="none" stroke="currentColor" stroke-width="1.8"/>
+              <circle cx="18" cy="17.5" r="2.4" fill="none" stroke="currentColor" stroke-width="1.8"/>
+            </svg>
+          </button>
+        </div>
         <span class="version" id="versionLabel"></span>
       </div>
     </div>
+    <div id="shareToast" class="share-toast hidden" role="status" aria-live="polite"></div>
 
     <!-- Master power button -->
     <div class="power-zone">
@@ -34,6 +45,8 @@
       Lekolar site permission is not granted. Click the extension icon on a Lekolar page and allow site access.
     </div>
 
+    <div id="priceSimulationStatus" class="price-simulation-status hidden" role="status" aria-live="polite"></div>
+
     <!-- SharePoint entitlement (kept on popup — quick at-a-glance check) -->
     <div class="section compact-section">
       <div class="section-row">
@@ -46,9 +59,6 @@
     <!-- Open full settings -->
     <div class="section compact-section">
       <button id="openSettingsBtn" class="primary-btn full-btn" type="button">⚙ Open settings</button>
-      <button id="openWhatsNewBtn" class="link-btn whats-new-btn" type="button">
-        What's new <span class="whats-new-dot hidden" id="whatsNewDot"></span>
-      </button>
     </div>
   </div>
 

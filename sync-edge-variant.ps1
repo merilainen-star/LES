@@ -28,6 +28,10 @@ $filesToCopy = @(
     "options.js",
     "options.css",
     "cryptoVault.js",
+    "facetVocabulary.js",
+    "categoryClassifier.js",
+    "aiPrompt.js",
+    "aiProviders.js",
     "searchUtils.js",
     "style.css",
     "logo.png",
@@ -47,9 +51,14 @@ foreach ($relativeFile in $filesToCopy) {
     Write-Host "Synced $relativeFile"
 }
 
-Write-Host "Creating zip package for Edge..."
-$zipPath = Join-Path $repoRoot "edge-extension.zip"
-Compress-Archive -Path "$edgePath\*" -DestinationPath $zipPath -Force
-Write-Host "Created $zipPath"
+$edgeOptionsPath = Join-Path $edgePath "options.html"
+$edgeOptions = Get-Content -LiteralPath $edgeOptionsPath -Raw
+$edgeOptions = $edgeOptions `
+    -replace "<h3>Firefox Add-ons</h3>", "<h3>Edge Add-ons</h3>" `
+    -replace "Open the Firefox add-on page on Mozilla Add-ons\.", "Open the Edge add-on page on Microsoft Edge Add-ons." `
+    -replace "https://addons.mozilla.org/en-US/developers/addon/778ccbb63fa64c838515/edit", "https://microsoftedge.microsoft.com/addons/detail/poiadopjpbekbageflcbghabcidpbjhj" `
+    -replace "Open Firefox Add-ons page", "Open Edge Add-ons page"
+Set-Content -LiteralPath $edgeOptionsPath -Value $edgeOptions -NoNewline
+Write-Host "Applied Edge About-page store link"
 
 Write-Host "Edge variant sync complete."

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Lekolar Enhancer",
-  "version": "1.26",
+  "version": "1.27",
   "description": "Adds copy buttons, infinite scroll, and search enhancements for Lekolar sites.",
   "permissions": [
     "activeTab",
@@ -14,7 +14,10 @@
     "*://*.lekolar.no/*",
     "*://*.lekolar.dk/*",
     "https://lekolarab.sharepoint.com/*",
-    "https://api.mymemory.translated.net/*"
+    "https://api.mymemory.translated.net/*",
+    "https://api.openai.com/*",
+    "https://api.anthropic.com/*",
+    "https://generativelanguage.googleapis.com/*"
   ],
   "action": {
     "default_popup": "popup.html",
@@ -50,6 +53,9 @@
       "js": [
         "defaults.js",
         "searchUtils.js",
+        "vendor/pptxgen-prelude.js",
+        "vendor/pptxgen.bundle.js",
+        "vendor/pptxgen-global.js",
         "content.js"
       ],
       "css": [

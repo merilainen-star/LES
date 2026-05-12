@@ -7,8 +7,14 @@ let currentSettings = (typeof lesMergeSettings === 'function')
         infiniteScroll: true,
         copyButtons: true,
         hideEnvironmentalLogo: false,
+        productLayoutDivider: true,
+        priceAdjustmentEnabled: false,
+        priceAdjustmentPercent: 0,
+        priceAdjustmentHighlightColor: '#fff3bf',
+        productCardPpt: (typeof LES_DEFAULT_PRODUCT_CARD_PPT_SETTINGS !== 'undefined') ? LES_DEFAULT_PRODUCT_CARD_PPT_SETTINGS : null,
         modifierKey: 'shiftKey',
-        secondaryModifierKey: 'altKey',
+        secondaryModifierKey: 'ctrlKey',
+        copyShortcutAltDefaultMigrated: true,
         copyFormats: (typeof LES_DEFAULT_FORMATS !== 'undefined') ? LES_DEFAULT_FORMATS : null,
         debugLogging: false
     };
@@ -37,6 +43,13 @@ function lesContentDisabled() {
 const SHAREPOINT_PROBE_URL = 'https://lekolarab.sharepoint.com/_api/web/currentuser?$select=Id,Title';
 const ENTITLEMENT_CACHE_KEY = 'lesSharePointEntitlement';
 const ENTITLEMENT_CACHE_TTL_MS = 3 * 60 * 60 * 1000;
+const PRODUCT_NOTES_STORAGE_KEY = 'lesProductNotes';
+const PRODUCT_NOTES_USER_KEY = 'lesProductNotesUserName';
+const PRODUCT_NOTE_MAX_LENGTH = 500;
+const PRODUCT_LAYOUT_STORAGE_KEY = 'lesProductLayoutDivider';
+const PRODUCT_LAYOUT_MIN_DETAILS_WIDTH = 260;
+const PRODUCT_LAYOUT_MIN_INFO_WIDTH = 300;
+const PRODUCT_LAYOUT_HANDLE_WIDTH = 18;
 
 let restrictedFeatureAccess = {
     status: 'unknown',
@@ -47,6 +60,13 @@ let restrictedFeatureAccess = {
 let entitlementCheckInFlight = null;
 const swedishReferenceCache = new Map();
 let activeProductNameSearchState = null;
+let productNotesByKey = {};
+let productNotesLoaded = false;
+let productNotesLoadPromise = null;
+let productNoteUserName = 'Me';
+let productLayoutPreference = null;
+let productLayoutPreferenceLoaded = false;
+let productLayoutPreferenceLoadPromise = null;
 
 function storageSyncGet(defaults) {
     return new Promise((resolve) => chrome.storage.sync.get(defaults, resolve));
@@ -155,17 +175,13 @@ function getEntitlementCacheTtlMs(status) {
 }
 
 function cleanupRestrictedUi() {
+    // Spec search and the SharePoint search button are public-safe (an unauthorized
+    // SharePoint click just lands on the login page), so only the price sorter is gated.
     const sortContainer = document.querySelector('.lekolar-sort-container');
     if (sortContainer) sortContainer.remove();
 
     const sortOverlay = document.getElementById('lekolar-sort-overlay');
     if (sortOverlay) sortOverlay.remove();
-
-    const complianceBtn = document.querySelector('.lekolar-compliance-btn');
-    if (complianceBtn) complianceBtn.remove();
-
-    const specSearchBtn = document.querySelector('.les-spec-search-btn');
-    if (specSearchBtn) specSearchBtn.remove();
 
     const buttonsBar = document.querySelector('.les-buttons-bar');
     if (buttonsBar && buttonsBar.children.length === 0) {
@@ -196,6 +212,8 @@ async function requestSharePointEntitlement() {
             resolve(result);
         };
 
+        // Must exceed background.js SHAREPOINT_REQUEST_TIMEOUT_MS so the actual probe
+        // result (entitled / login_required / no_access) wins over our local cutoff.
         const timeoutId = setTimeout(() => {
             finish({
                 status: 'error',
@@ -203,7 +221,7 @@ async function requestSharePointEntitlement() {
                 error: 'probe_timeout',
                 checkedAt: Date.now()
             });
-        }, 3000);
+        }, 14000);
 
         try {
             chrome.runtime.sendMessage(
@@ -389,7 +407,7 @@ function getProductNameFromElement(h1) {
     if (!h1) return null;
 
     const clone = h1.cloneNode(true);
-    clone.querySelectorAll('.lekolar-copy-btn, .les-product-name-search-btn').forEach(el => el.remove());
+    clone.querySelectorAll('.lekolar-copy-btn, .les-product-name-search-btn, .les-product-note-btn').forEach(el => el.remove());
 
     const text = normalizeWhitespace(clone.textContent || '');
     return text || normalizeWhitespace(h1.dataset.lesProductName || '') || null;
@@ -776,6 +794,12 @@ function ensureProductActionBar() {
         return buttonsBar;
     }
 
+    const productInfo = document.querySelector('.product-info, .product-page-wrapper .product-info, .product-page .product-info');
+    if (productInfo) {
+        productInfo.appendChild(buttonsBar);
+        return buttonsBar;
+    }
+
     return null;
 }
 
@@ -952,7 +976,42 @@ function flashButtonTooltip(button, label = 'Copied!') {
     }, 2000);
 }
 
+function getSelectedVariantArticleNumber() {
+    // The server-rendered DOM keeps js-currentImage on the default slide regardless of
+    // ?variant=. Resolve the actual selected variant from the URL / page wrapper / thumb.
+    try {
+        const variant = new URL(window.location.href).searchParams.get('variant');
+        if (variant && variant.trim()) return variant.trim();
+    } catch (_) {}
+
+    const wrapper = document.querySelector('.product-page-wrapper');
+    if (wrapper) {
+        const articleNumber = wrapper.getAttribute('data-articlenumber') || wrapper.getAttribute('data-articleNumber');
+        if (articleNumber && articleNumber.trim()) return articleNumber.trim();
+    }
+
+    const selectedThumb = document.querySelector('.js-productImageThumb.selected[data-articlenr]');
+    if (selectedThumb) {
+        const articleNumber = selectedThumb.getAttribute('data-articlenr');
+        if (articleNumber && articleNumber.trim()) return articleNumber.trim();
+    }
+
+    return '';
+}
+
+function findVariantImageSlide(articleNumber) {
+    if (!articleNumber) return null;
+    const escaped = (typeof CSS !== 'undefined' && CSS.escape) ? CSS.escape(articleNumber) : articleNumber.replace(/"/g, '\\"');
+    return document.querySelector(`.product-image-wrapper .js-productImage[data-articlenr="${escaped}"]`);
+}
+
 function getMainProductImageUrl() {
+    const variantSlide = findVariantImageSlide(getSelectedVariantArticleNumber());
+    if (variantSlide) {
+        const href = variantSlide.getAttribute('href');
+        if (href) return new URL(href, window.location.href).href;
+    }
+
     const imageLink = document.querySelector(
         '.product-image-wrapper .js-currentImage, .product-image-wrapper .current-image, .product-image-wrapper .js-productImage'
     );
@@ -971,6 +1030,12 @@ function getMainProductImageUrl() {
 }
 
 function getMainProductImageElement() {
+    const variantSlide = findVariantImageSlide(getSelectedVariantArticleNumber());
+    if (variantSlide) {
+        const variantImage = variantSlide.querySelector('img.product-image, img');
+        if (variantImage) return variantImage;
+    }
+
     return document.querySelector(
         '.product-image-wrapper .js-currentImage img.product-image, .product-image-wrapper .js-currentImage img, ' +
         '.product-image-wrapper .current-image img.product-image, .product-image-wrapper .current-image img, ' +
@@ -1141,6 +1206,702 @@ function ensureProductImageActionButton() {
     return button;
 }
 
+function stripProductCardControlChars(value) {
+    return String(value == null ? '' : value).replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '');
+}
+
+function truncateProductCardText(value, maxLength) {
+    const text = stripProductCardControlChars(normalizeWhitespace(value || ''));
+    if (!maxLength || text.length <= maxLength) return text;
+    return text.slice(0, Math.max(0, maxLength - 1)).trimEnd() + '...';
+}
+
+function safeFileName(value) {
+    const cleaned = stripProductCardControlChars(value || 'product-card')
+        .replace(/[<>:"/\\|?*]/g, '-')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, 140)
+        .replace(/[. ]+$/g, '');
+    return cleaned || 'product-card';
+}
+
+function createProductCardFileName(product) {
+    const title = product && (product.title || product.name) ? (product.title || product.name) : 'Product card';
+    const sku = product && product.sku ? product.sku : '';
+    return `${safeFileName(`${sku ? sku + ' - ' : ''}${title}`)}.pptx`;
+}
+
+function lesCleanElementText(element) {
+    if (!element) return '';
+    const clone = element.cloneNode(true);
+    clone.querySelectorAll('script, style, svg, button, input, select, textarea, .tooltip, .les-buttons-bar').forEach(node => node.remove());
+    return normalizeWhitespace(clone.textContent || '');
+}
+
+function getCurrentProductSpecsForPpt() {
+    const specs = [];
+    const seen = new Set();
+    const rows = document.querySelectorAll(
+        '.product-properties tr, .product-properties li, .product-properties .d-flex, ' +
+        '.product-attributes tr, .product-attributes li, .product-attributes .d-flex, ' +
+        '.product-details tr, .product-details li, .product-details .d-flex, ' +
+        '.product-specs tr, .product-specs li, .product-specs .d-flex'
+    );
+
+    rows.forEach(row => {
+        if (!row || row.closest('.les-buttons-bar')) return;
+
+        const labelEl = row.querySelector('th, dt, .product-attributes__name, .heading, strong');
+        if (!labelEl) return;
+
+        let valueEl = null;
+        if (row.tagName && row.tagName.toLowerCase() === 'li') {
+            valueEl = row.querySelector('span:not(.heading):not(.color-wrapper), .product-attributes__value');
+            if (!valueEl) valueEl = row.querySelector('.color-wrapper');
+        } else {
+            valueEl = row.querySelector('td, dd, .product-attributes__value, span:not(.heading):not(.color-wrapper)');
+        }
+
+        const label = lesCleanElementText(labelEl).replace(/:$/, '').trim();
+        if (!label) return;
+
+        let value = '';
+        const colorBubble = valueEl && valueEl.querySelector ? valueEl.querySelector('.color-bubble') : null;
+        if (colorBubble && colorBubble.title) {
+            value = normalizeWhitespace(colorBubble.title);
+        } else if (valueEl) {
+            value = lesCleanElementText(valueEl);
+        } else {
+            const clone = row.cloneNode(true);
+            clone.querySelectorAll('script, style, svg, button, input, select, textarea, .tooltip, .les-buttons-bar').forEach(node => node.remove());
+            value = normalizeWhitespace((clone.textContent || '').replace(labelEl.textContent || '', ''));
+        }
+
+        if (value.toLowerCase().startsWith(label.toLowerCase())) {
+            value = value.slice(label.length).replace(/^[:\s-]+/, '').trim();
+        }
+        if (!value) return;
+
+        const line = `${label}: ${value}`;
+        const key = line.toLowerCase();
+        if (seen.has(key)) return;
+        seen.add(key);
+        specs.push(line);
+    });
+
+    return specs.slice(0, 18);
+}
+
+function extractProductDataFromPage() {
+    const number = normalizeWhitespace(getMainProductNumber() || getSelectedVariantArticleNumber() || getMainProductCode() || '');
+    const title = truncateProductCardText(getProductName() || document.title.replace(/\s*\|\s*Lekolar.*$/i, ''), 130);
+    const description = truncateProductCardText(getCurrentDescriptionText(), 620);
+    const specs = getCurrentProductSpecsForPpt().map(line => truncateProductCardText(line, 160));
+    const url = window.location.href.split('#')[0];
+    const imageUrl = getMainProductImageUrl();
+    const environmentalLogos = extractProductCardEnvironmentalLogos();
+
+    if (!title && !number) console.warn('LES: Product card PPT could not find a product title or SKU.');
+    if (!description) console.warn('LES: Product card PPT could not find a product description.');
+    if (!specs.length) console.warn('LES: Product card PPT could not find product specifications.');
+    if (!imageUrl) console.warn('LES: Product card PPT could not find a product image URL.');
+
+    return {
+        sku: number,
+        number,
+        title: title || number || 'Product card',
+        name: title || number || 'Product card',
+        description,
+        specs,
+        imageUrl,
+        environmentalLogos,
+        url,
+        countryCode: getCurrentCountryCode()
+    };
+}
+
+function resolveProductCardAssetUrl(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    try {
+        return new URL(raw, window.location.href).href;
+    } catch (_) {
+        return raw;
+    }
+}
+
+function extractProductCardEnvironmentalLogos() {
+    const logos = [];
+    const seen = new Set();
+    const selectors = [
+        '.symbols img',
+        '.product-symbols img',
+        '.product-symbols__item img',
+        '.product-flags img',
+        '.environmental-symbols img',
+        '.product-environmental-symbols img',
+        'img[class^="symbol-"]',
+        'img[class*=" symbol-"]'
+    ].join(', ');
+
+    document.querySelectorAll(selectors).forEach(img => {
+        const src = img.currentSrc || img.src || img.getAttribute('src') || '';
+        const url = resolveProductCardAssetUrl(src);
+        if (!url || seen.has(url)) return;
+        const label = normalizeWhitespace(img.getAttribute('alt') || img.getAttribute('title') || '');
+        seen.add(url);
+        logos.push({ url, label });
+    });
+
+    return logos.slice(0, 8);
+}
+
+async function imageUrlToDataUri(url) {
+    if (!url) return '';
+
+    try {
+        const response = await fetch(url, { credentials: 'include', cache: 'force-cache' });
+        if (!response.ok) throw new Error(`Image request failed with HTTP ${response.status}`);
+        const blob = await response.blob();
+        if (!blob || !blob.size) throw new Error('Image response was empty.');
+
+        const type = String(blob.type || '').toLowerCase();
+        if (type === 'image/png' || type === 'image/jpeg' || type === 'image/jpg' || type === 'image/gif') {
+            return await blobToDataUri(blob);
+        }
+
+        if (type.startsWith('image/')) {
+            return await imageBlobToPngDataUri(blob);
+        }
+
+        throw new Error(`Unsupported product image content type: ${blob.type || 'unknown'}`);
+    } catch (error) {
+        console.warn('LES: Failed to load product image for PPT. Generating without image.', error);
+        return '';
+    }
+}
+
+function blobToDataUri(blob) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ''));
+        reader.onerror = () => reject(reader.error || new Error('Image FileReader failed.'));
+        reader.readAsDataURL(blob);
+    });
+}
+
+async function imageBlobToPngDataUri(blob) {
+    const urlApi = window.URL || window.webkitURL;
+    if (!urlApi || !urlApi.createObjectURL) throw new Error('Browser does not support image conversion.');
+
+    const objectUrl = urlApi.createObjectURL(blob);
+    try {
+        const image = new Image();
+        image.decoding = 'async';
+        const loaded = new Promise((resolve, reject) => {
+            image.onload = resolve;
+            image.onerror = () => reject(new Error('Product image could not be decoded for PPT.'));
+        });
+        image.src = objectUrl;
+        await loaded;
+
+        const sourceWidth = image.naturalWidth || image.width;
+        const sourceHeight = image.naturalHeight || image.height;
+        if (!sourceWidth || !sourceHeight) throw new Error('Product image dimensions were empty.');
+
+        const maxSide = 1800;
+        const scale = Math.min(1, maxSide / Math.max(sourceWidth, sourceHeight));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(sourceWidth * scale));
+        canvas.height = Math.max(1, Math.round(sourceHeight * scale));
+        const context = canvas.getContext('2d');
+        if (!context) throw new Error('Canvas is not available for product image conversion.');
+        context.drawImage(image, 0, 0, canvas.width, canvas.height);
+
+        return canvas.toDataURL('image/png');
+    } finally {
+        urlApi.revokeObjectURL(objectUrl);
+    }
+}
+
+function getProductCardImageSize(dataUri) {
+    if (!dataUri) return Promise.resolve(null);
+
+    return new Promise((resolve) => {
+        const image = new Image();
+        image.onload = () => {
+            const width = image.naturalWidth || image.width;
+            const height = image.naturalHeight || image.height;
+            resolve(width && height ? { width, height } : null);
+        };
+        image.onerror = () => resolve(null);
+        image.src = dataUri;
+    });
+}
+
+function getProductCardImagePlacement(imageSize, frame) {
+    if (!imageSize || !imageSize.width || !imageSize.height) return frame;
+
+    const aspect = imageSize.width / imageSize.height;
+    let h = frame.h;
+    let w = h * aspect;
+
+    if (w > frame.w) {
+        w = frame.w;
+        h = w / aspect;
+    }
+
+    return {
+        x: frame.x + ((frame.w - w) / 2),
+        y: frame.y + ((frame.h - h) / 2),
+        w,
+        h
+    };
+}
+
+function getProductCardLogoPlacement(imageSize, frame) {
+    if (!imageSize || !imageSize.width || !imageSize.height) return frame;
+
+    const aspect = imageSize.width / imageSize.height;
+    let h = frame.h;
+    let w = h * aspect;
+
+    if (w > frame.w) {
+        w = frame.w;
+        h = w / aspect;
+    }
+
+    return {
+        x: frame.x,
+        y: frame.y + ((frame.h - h) / 2),
+        w,
+        h
+    };
+}
+
+function getProductCardPptSettings() {
+    if (typeof lesCloneProductCardPptSettings === 'function') {
+        return lesCloneProductCardPptSettings(currentSettings && currentSettings.productCardPpt);
+    }
+    return {
+        bannerColor: '#B5121B',
+        labels: { item: 'Item', description: 'Description', specifications: 'Specifications' },
+        linkFormat: { tokens: [{ type: 'url' }] }
+    };
+}
+
+function productCardPptColor(value, fallback = 'B5121B') {
+    const color = String(value || '').trim();
+    return /^#[0-9a-f]{6}$/i.test(color) ? color.slice(1).toUpperCase() : fallback;
+}
+
+function getProductCardLinkText(product, settings) {
+    const format = settings && settings.linkFormat ? settings.linkFormat : { tokens: [{ type: 'url' }] };
+    const context = {
+        number: product.sku || product.number || '',
+        name: product.title || product.name || '',
+        url: product.url || '',
+        value: product.url || ''
+    };
+    const text = typeof lesRenderCopyFormat === 'function'
+        ? lesRenderCopyFormat(format, context)
+        : context.url;
+    return truncateProductCardText(text || context.url, 240);
+}
+
+async function hydrateProductCardLogo(logo) {
+    if (!logo || !logo.url) return null;
+    const dataUri = logo.dataUri || await imageUrlToDataUri(logo.url);
+    if (!dataUri) return null;
+    return {
+        ...logo,
+        dataUri,
+        imageSize: logo.imageSize || await getProductCardImageSize(dataUri)
+    };
+}
+
+async function hydrateProductCardVisualAssets(product) {
+    const output = {
+        ...product,
+        pptSettings: product.pptSettings || getProductCardPptSettings(),
+        imageData: product.imageData || await imageUrlToDataUri(product.imageUrl)
+    };
+
+    if (output.imageData && !output.imageSize) {
+        output.imageSize = await getProductCardImageSize(output.imageData);
+    }
+
+    const rawEnvLogos = Array.isArray(output.environmentalLogos) ? output.environmentalLogos : [];
+    output.environmentalLogos = (await Promise.all(rawEnvLogos.slice(0, 8).map(hydrateProductCardLogo))).filter(Boolean);
+
+    if (!output.lekolarLogo && chrome.runtime && chrome.runtime.getURL) {
+        const logoData = await imageUrlToDataUri(chrome.runtime.getURL('logo.png'));
+        if (logoData) {
+            output.lekolarLogo = {
+                dataUri: logoData,
+                imageSize: await getProductCardImageSize(logoData)
+            };
+        }
+    }
+
+    return output;
+}
+
+function getPptxGenConstructor() {
+    const root = typeof globalThis !== 'undefined'
+        ? globalThis
+        : (typeof window !== 'undefined' ? window : self);
+    let ctor = root.PptxGenJS || root.pptxgen || root.pptxgenjs;
+    if (!ctor && typeof window !== 'undefined') {
+        ctor = window.PptxGenJS || window.pptxgen || window.pptxgenjs;
+    }
+    if (!ctor && typeof PptxGenJS !== 'undefined') {
+        ctor = PptxGenJS;
+    }
+    if (!ctor) {
+        throw new Error('PptxGenJS is not loaded. Check manifest content script order and vendor/pptxgen.bundle.js.');
+    }
+    return ctor.default || ctor;
+}
+
+function showProductCardStatus(message, type = 'info') {
+    if (type === 'error') console.warn(`LES: ${message}`);
+    showCompareToast(message);
+}
+
+function getProductCardErrorText(error) {
+    if (!error) return '';
+    if (typeof error === 'string') return error;
+    if (error.message) return error.message;
+    try {
+        return String(error);
+    } catch {
+        return '';
+    }
+}
+
+function getProductCardUserErrorMessage(error) {
+    const message = getProductCardErrorText(error);
+    if (/PptxGenJS is not loaded/i.test(message)) {
+        return 'PPT library not loaded. Reload the extension and page.';
+    }
+    return 'Could not create product card PPT. See console for details.';
+}
+
+function isPptxLibraryMissingError(error) {
+    return /PptxGenJS is not loaded/i.test(getProductCardErrorText(error));
+}
+
+function triggerProductCardBlobDownload(blob, fileName) {
+    if (!blob || !blob.size) throw new Error('PPTX blob was empty.');
+    const urlApi = window.URL || window.webkitURL;
+    if (!urlApi || !urlApi.createObjectURL) throw new Error('Browser does not support Blob downloads.');
+    const host = document.body || document.documentElement;
+    if (!host) throw new Error('Cannot start PPT download before the page body exists.');
+
+    const url = urlApi.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = fileName;
+    link.rel = 'noopener';
+    link.dataset.interception = 'off';
+    link.style.display = 'none';
+    host.appendChild(link);
+    link.click();
+
+    setTimeout(() => {
+        urlApi.revokeObjectURL(url);
+        if (link.remove) {
+            link.remove();
+        } else if (link.parentNode) {
+            link.parentNode.removeChild(link);
+        }
+    }, 1000);
+}
+
+async function writeProductCardPptx(pptx, fileName) {
+    try {
+        await pptx.writeFile({ fileName, compression: true });
+        return;
+    } catch (writeFileError) {
+        console.warn('LES: PptxGenJS writeFile failed. Trying Blob download fallback.', writeFileError);
+    }
+
+    const output = await pptx.write({ outputType: 'blob', compression: true });
+    const blob = output instanceof Blob
+        ? output
+        : new Blob([output], { type: 'application/vnd.openxmlformats-officedocument.presentationml.presentation' });
+    triggerProductCardBlobDownload(blob, fileName);
+}
+
+function productCardBase64ToBlob(base64, mimeType) {
+    const binary = atob(base64 || '');
+    const chunks = [];
+    for (let offset = 0; offset < binary.length; offset += 32768) {
+        const slice = binary.slice(offset, offset + 32768);
+        const bytes = new Uint8Array(slice.length);
+        for (let i = 0; i < slice.length; i++) bytes[i] = slice.charCodeAt(i);
+        chunks.push(bytes);
+    }
+    return new Blob(chunks, { type: mimeType || 'application/vnd.openxmlformats-officedocument.presentationml.presentation' });
+}
+
+function sendProductCardPptxBackgroundRequest(product) {
+    return new Promise((resolve, reject) => {
+        chrome.runtime.sendMessage(
+            {
+                action: 'lesCreateProductCardPptx',
+                product
+            },
+            (response) => {
+                if (chrome.runtime.lastError) {
+                    reject(new Error(chrome.runtime.lastError.message));
+                    return;
+                }
+                if (!response || response.ok !== true || !response.base64) {
+                    reject(new Error((response && response.error) ? response.error : 'background_pptx_failed'));
+                    return;
+                }
+
+                const blob = productCardBase64ToBlob(response.base64, response.mimeType);
+                triggerProductCardBlobDownload(blob, response.fileName || createProductCardFileName(product));
+                resolve();
+            }
+        );
+    });
+}
+
+async function requestProductCardPptxFromBackground(product) {
+    try {
+        await sendProductCardPptxBackgroundRequest(product);
+    } catch (error) {
+        if (!product || !product.imageData) throw error;
+        console.warn('LES: Background PPT generation failed with image data. Retrying without image.', error);
+        const productWithoutImage = { ...product, imageData: '' };
+        await sendProductCardPptxBackgroundRequest(productWithoutImage);
+    }
+}
+
+async function generateProductCardPptx(product) {
+    const productForPpt = await hydrateProductCardVisualAssets(product);
+
+    let PptxGenJS;
+    try {
+        PptxGenJS = getPptxGenConstructor();
+    } catch (error) {
+        if (!isPptxLibraryMissingError(error)) throw error;
+        console.warn('LES: PptxGenJS is not available in the content script. Trying background PPTX generation.', error);
+        await requestProductCardPptxFromBackground(productForPpt);
+        return;
+    }
+
+    const pptx = new PptxGenJS();
+    pptx.layout = 'LAYOUT_WIDE';
+    pptx.author = 'Lekolar Enhancer';
+    pptx.company = 'Lekolar';
+    pptx.subject = 'Product card';
+    pptx.title = productForPpt.title || 'Product card';
+    pptx.lang = 'en-US';
+
+    const slide = pptx.addSlide();
+    slide.background = { color: 'FFFFFF' };
+
+    const shapeType = pptx.ShapeType || {};
+    const rectShape = shapeType.rect || 'rect';
+    const pptSettings = productForPpt.pptSettings || getProductCardPptSettings();
+    const accentColor = productCardPptColor(pptSettings.bannerColor);
+    const imageData = productForPpt.imageData || '';
+    const title = productForPpt.title || 'Product card';
+    const skuText = productForPpt.sku ? `${pptSettings.labels.item} ${productForPpt.sku}` : 'Product card';
+    const descText = productForPpt.description || 'No product description found on page.';
+    const specLines = productForPpt.specs && productForPpt.specs.length ? productForPpt.specs : ['No product specifications found on page.'];
+    const specsText = specLines.map(line => `- ${line}`).join('\n');
+
+    slide.addShape(rectShape, { x: 0, y: 0, w: 13.333, h: 0.86, fill: { color: accentColor }, line: { color: accentColor } });
+    slide.addText(title, { x: 0.45, y: 0.12, w: 8.65, h: 0.62, margin: 0.04, fontFace: 'Arial', fontSize: 23, bold: true, color: 'FFFFFF', valign: 'middle', fit: 'shrink' });
+    slide.addText(skuText, { x: 9.25, y: 0.20, w: 3.45, h: 0.44, margin: 0.04, fontFace: 'Arial', fontSize: 12, bold: true, color: 'FFFFFF', align: 'right', valign: 'middle', fit: 'shrink' });
+
+    slide.addShape(rectShape, { x: 0.55, y: 1.35, w: 5.15, h: 4.65, fill: { color: 'F8FAFC' }, line: { color: 'E2E8F0', width: 1 } });
+    if (imageData) {
+        const imageBox = getProductCardImagePlacement(productForPpt.imageSize, {
+            x: 0.65,
+            y: 1.45,
+            w: 4.95,
+            h: 4.45
+        });
+        slide.addImage({
+            data: imageData,
+            x: imageBox.x,
+            y: imageBox.y,
+            w: imageBox.w,
+            h: imageBox.h
+        });
+    } else {
+        slide.addText('No product image', { x: 0.75, y: 3.25, w: 4.75, h: 0.35, fontFace: 'Arial', fontSize: 16, color: '64748B', align: 'center' });
+    }
+
+    slide.addText(pptSettings.labels.description, { x: 6.05, y: 1.20, w: 6.65, h: 0.28, fontFace: 'Arial', fontSize: 12, bold: true, color: accentColor, margin: 0 });
+    slide.addText(descText, { x: 6.05, y: 1.55, w: 6.65, h: 1.48, fontFace: 'Arial', fontSize: 11, color: '1F2937', margin: 0.06, breakLine: false, fit: 'shrink', valign: 'top' });
+    slide.addText(pptSettings.labels.specifications, { x: 6.05, y: 3.23, w: 6.65, h: 0.28, fontFace: 'Arial', fontSize: 12, bold: true, color: accentColor, margin: 0 });
+    slide.addText(specsText, { x: 6.05, y: 3.58, w: 6.65, h: 2.28, fontFace: 'Arial', fontSize: 9.5, color: '1F2937', margin: 0.06, breakLine: false, fit: 'shrink', valign: 'top' });
+
+    if (productForPpt.url) {
+        slide.addText(getProductCardLinkText(productForPpt, pptSettings), {
+            x: 0.55,
+            y: 6.18,
+            w: 12.15,
+            h: 0.38,
+            fontFace: 'Arial',
+            fontSize: 8,
+            color: '2563EB',
+            margin: 0,
+            hyperlink: { url: productForPpt.url, tooltip: 'Open product page' },
+            fit: 'shrink'
+        });
+    }
+
+    addProductCardFooterLogos(slide, productForPpt);
+    await writeProductCardPptx(pptx, createProductCardFileName(productForPpt));
+}
+
+function addProductCardFooterLogos(slide, product) {
+    let x = 0.55;
+    const y = 6.78;
+    const maxRight = 5.75;
+    (product.environmentalLogos || []).forEach(logo => {
+        if (!logo || !logo.dataUri || x >= maxRight) return;
+        const box = getProductCardLogoPlacement(logo.imageSize, { x, y, w: 1.05, h: 0.38 });
+        if (box.x + box.w > maxRight) return;
+        slide.addImage({
+            data: logo.dataUri,
+            x: box.x,
+            y: box.y,
+            w: box.w,
+            h: box.h
+        });
+        x = box.x + box.w + 0.16;
+    });
+
+    if (product.lekolarLogo && product.lekolarLogo.dataUri) {
+        const logoBox = getProductCardLogoPlacement(product.lekolarLogo.imageSize, {
+            x: 11.75,
+            y: 6.76,
+            w: 0.95,
+            h: 0.42
+        });
+        slide.addImage({
+            data: product.lekolarLogo.dataUri,
+            x: 12.70 - logoBox.w,
+            y: logoBox.y,
+            w: logoBox.w,
+            h: logoBox.h
+        });
+    }
+}
+
+function createProductCardPptSvg(size = 14) {
+    const svgNS = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(svgNS, 'svg');
+    svg.setAttribute('width', String(size));
+    svg.setAttribute('height', String(size));
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('fill', 'none');
+    svg.setAttribute('stroke', 'currentColor');
+    svg.setAttribute('stroke-width', '2');
+    svg.setAttribute('stroke-linecap', 'round');
+    svg.setAttribute('stroke-linejoin', 'round');
+
+    const file = document.createElementNS(svgNS, 'path');
+    file.setAttribute('d', 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z');
+    const fold = document.createElementNS(svgNS, 'path');
+    fold.setAttribute('d', 'M14 2v6h6');
+    const line1 = document.createElementNS(svgNS, 'path');
+    line1.setAttribute('d', 'M8 13h8');
+    const line2 = document.createElementNS(svgNS, 'path');
+    line2.setAttribute('d', 'M8 17h5');
+    svg.appendChild(file);
+    svg.appendChild(fold);
+    svg.appendChild(line1);
+    svg.appendChild(line2);
+    return svg;
+}
+
+async function downloadCurrentProductCardPpt(button) {
+    const data = extractProductDataFromPage();
+    if (!data.title && !data.sku) {
+        showProductCardStatus('Could not find product data for PPT.', 'error');
+        return;
+    }
+
+    const originalTitle = button ? button.title : '';
+    const label = button ? button.querySelector('.les-product-card-ppt-label') : null;
+    const originalLabel = label ? label.textContent : '';
+    if (button) {
+        button.disabled = true;
+        button.classList.add('is-loading');
+        button.title = 'Generating PPT...';
+        if (label) label.textContent = 'Generating PPT...';
+    }
+
+    try {
+        await generateProductCardPptx(data);
+        showProductCardStatus('Product card PPT downloaded.', 'success');
+    } catch (error) {
+        console.error('LES: Failed to create product card PPT:', error);
+        showProductCardStatus(getProductCardUserErrorMessage(error), 'error');
+    } finally {
+        if (button) {
+            button.disabled = false;
+            button.classList.remove('is-loading');
+            button.title = originalTitle || 'Download product card as PPT';
+            if (label) label.textContent = originalLabel || 'PPT';
+        }
+    }
+}
+
+function cleanupProductCardPptButton() {
+    const btn = document.querySelector('.les-product-card-ppt-btn');
+    if (btn) btn.remove();
+    const buttonsBar = document.querySelector('.les-buttons-bar');
+    if (buttonsBar && buttonsBar.children.length === 0) buttonsBar.remove();
+}
+
+function ensureProductCardPptButton() {
+    if (isListPage() || !getProductNameElement()) {
+        cleanupProductCardPptButton();
+        return;
+    }
+
+    let btn = document.querySelector('.les-product-card-ppt-btn');
+    if (!btn) {
+        btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'les-product-card-ppt-btn';
+        btn.title = 'Download product card as PPT';
+        btn.setAttribute('aria-label', 'Download product card as PPT');
+
+        const label = document.createElement('span');
+        label.className = 'les-product-card-ppt-label';
+        label.textContent = 'PPT';
+        btn.appendChild(createProductCardPptSvg(14));
+        btn.appendChild(label);
+
+        btn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            downloadCurrentProductCardPpt(btn);
+        });
+    }
+
+    const buttonsBar = ensureProductActionBar();
+    if (buttonsBar && btn.parentElement !== buttonsBar) {
+        const complianceBtn = buttonsBar.querySelector('.lekolar-compliance-btn');
+        if (complianceBtn) buttonsBar.insertBefore(btn, complianceBtn);
+        else buttonsBar.appendChild(btn);
+    }
+}
+
 function getSwedishReferencePanel() {
     return document.querySelector('.les-sv-reference-panel');
 }
@@ -1198,12 +1959,61 @@ function fetchHtmlThroughBackground(url) {
                 return;
             }
             if (!response || response.ok !== true || typeof response.html !== 'string') {
-                reject(new Error((response && response.error) ? response.error : 'fetch_failed'));
+                const error = new Error((response && response.error) ? response.error : 'fetch_failed');
+                if (response && response.status) error.status = response.status;
+                if (response && response.url) error.url = response.url;
+                reject(error);
                 return;
             }
             resolve(response);
         });
     });
+}
+
+function lesHasExternalServicesConsentFromStorage() {
+    return new Promise(resolve => {
+        try {
+            chrome.storage.sync.get('externalServicesConsent', data => {
+                resolve(!!(data && data.externalServicesConsent));
+            });
+        } catch (_) {
+            resolve(false);
+        }
+    });
+}
+
+const LES_TRANSLATE_BTN_CONSENT_TOOLTIP =
+    'External services are off. Enable them in the Lekolar Enhancer settings (General → External services) to allow translation via MyMemory.';
+
+function lesApplyConsentStateToTranslateButton(btn, hasConsent) {
+    if (!btn) return;
+    if (hasConsent) {
+        btn.classList.remove('les-sv-reference-translate-btn-blocked');
+        btn.disabled = false;
+        btn.removeAttribute('aria-disabled');
+        btn.removeAttribute('title');
+        return;
+    }
+    btn.classList.add('les-sv-reference-translate-btn-blocked');
+    btn.disabled = true;
+    btn.setAttribute('aria-disabled', 'true');
+    btn.title = LES_TRANSLATE_BTN_CONSENT_TOOLTIP;
+    // Drop any cached translation so re-enabling consent forces a fresh fetch
+    // through the background gate rather than reusing stale text.
+    delete btn.dataset.translatedText;
+}
+
+try {
+    chrome.storage.onChanged.addListener((changes, area) => {
+        if (area !== 'sync') return;
+        if (!Object.prototype.hasOwnProperty.call(changes, 'externalServicesConsent')) return;
+        const hasConsent = !!changes.externalServicesConsent.newValue;
+        document.querySelectorAll('.les-sv-reference-translate-btn').forEach(btn => {
+            lesApplyConsentStateToTranslateButton(btn, hasConsent);
+        });
+    });
+} catch (_) {
+    // No live updates if storage.onChanged is unavailable; the on-render check still applies.
 }
 
 function requestInlineTranslation(text, targetLang) {
@@ -1238,12 +2048,2354 @@ async function fetchHtmlDocument(url) {
         doc.__lesFetchedUrl = result.url || url;
         return doc;
     } catch (error) {
-        throw new Error((error && error.message) ? error.message : 'NetworkError when attempting to fetch resource.');
+        const nextError = new Error((error && error.message) ? error.message : 'NetworkError when attempting to fetch resource.');
+        if (error && error.status) nextError.status = error.status;
+        if (error && error.url) nextError.url = error.url;
+        throw nextError;
     }
+}
+
+function getRemoteFetchStatus(error) {
+    if (error && Number(error.status) > 0) return Number(error.status);
+    const message = (error && error.message) ? error.message : String(error || '');
+    const match = message.match(/^http_(\d{3})$/i);
+    return match ? Number(match[1]) : 0;
+}
+
+function isMissingRemotePageError(error) {
+    const status = getRemoteFetchStatus(error);
+    return status === 404 || status === 410;
+}
+
+function formatSwedishReferenceError(error) {
+    const message = (error && error.message) ? error.message : String(error || '');
+    if (isMissingRemotePageError(error) || message === 'Could not find Swedish product page') {
+        return 'No Swedish product page found for this item.';
+    }
+    if (message === 'Swedish description was empty') {
+        return 'The Swedish page was found, but it has no product text.';
+    }
+    if (message === 'timeout') {
+        return 'Swedish lookup timed out. Please try again.';
+    }
+
+    const status = getRemoteFetchStatus(error);
+    if (status) return `Swedish lookup failed (HTTP ${status}).`;
+    return message || 'Could not load Swedish reference.';
+}
+
+// --- Product Tree Explorer ---
+
+const PRODUCT_TREE_TOP_CATEGORIES = [
+    {
+        menuId: '289134',
+        title: 'Kalusteet & sisustus',
+        aliases: ['Kaluste- & sisustusvalikoima'],
+        roots: [
+            { title: 'Kalusteet & sisustus', path: '/verkkokauppa/kaluste-sisustusvalikoima/' }
+        ]
+    },
+    {
+        menuId: '289135',
+        title: 'Kuvataide & askartelu',
+        roots: [
+            { title: 'Kuvataide & askartelu', path: '/verkkokauppa/kuvataide-askartelu/' }
+        ]
+    },
+    {
+        menuId: '289136',
+        title: 'Leikki & pelit',
+        aliases: ['Lelut', 'Ulkoleikkikenttä'],
+        roots: [
+            { title: 'Lelut', path: '/verkkokauppa/lelut/' },
+            { title: 'Ulkoleikkikenttä', path: '/verkkokauppa/ulkoleikkikentta/' }
+        ]
+    },
+    {
+        menuId: '289137',
+        title: 'Opetusvälineet',
+        roots: [
+            { title: 'Opetusvälineet', path: '/verkkokauppa/opetusvalineet/' }
+        ]
+    },
+    {
+        menuId: '289139',
+        title: 'Lastenrattaat & -tarvikkeet',
+        roots: [
+            { title: 'Lastenrattaat & -tarvikkeet', path: '/verkkokauppa/lastenrattaat-tarvikkeet/' }
+        ]
+    },
+    {
+        menuId: '289138',
+        title: 'Koulu- & toimistotarvikkeet',
+        aliases: ['Opiskelu- & toimistotarvikkeet'],
+        roots: [
+            { title: 'Koulu- & toimistotarvikkeet', path: '/verkkokauppa/opiskelu-toimistotarvikkeet/' }
+        ]
+    },
+    {
+        menuId: '289141',
+        title: 'Kalenterit & painotuotteet',
+        aliases: ['Kalenterit ja painotuotteet'],
+        roots: [
+            { title: 'Kalenterit & painotuotteet', path: '/verkkokauppa/painettu-materiaali/kalenterit-ja-painotuotteet/' }
+        ]
+    }
+];
+
+const PRODUCT_TREE_CACHE_TTL_MS = 30 * 60 * 1000;
+const PRODUCT_TREE_MAX_PAGES = 180;
+const PRODUCT_TREE_MAX_DEPTH = 5;
+const productTreeCache = new Map();
+let productTreeModalKeyHandler = null;
+
+function normalizeProductTreeText(value) {
+    return normalizeWhitespace(value)
+        .toLowerCase()
+        .replace(/&/g, 'ja')
+        .replace(/[.,:;()[\]{}]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function createProductTreeSvg(size = 16) {
+    const svgNS = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(svgNS, 'svg');
+    svg.setAttribute('xmlns', svgNS);
+    svg.setAttribute('width', String(size));
+    svg.setAttribute('height', String(size));
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('fill', 'none');
+    svg.setAttribute('stroke', 'currentColor');
+    svg.setAttribute('stroke-width', '2');
+    svg.setAttribute('stroke-linecap', 'round');
+    svg.setAttribute('stroke-linejoin', 'round');
+
+    const paths = [
+        'M12 3v6',
+        'M6 9h12',
+        'M6 9v4',
+        'M18 9v4',
+        'M12 9v4',
+        'M4 17h4',
+        'M10 17h4',
+        'M16 17h4'
+    ];
+
+    paths.forEach(value => {
+        const path = document.createElementNS(svgNS, 'path');
+        path.setAttribute('d', value);
+        svg.appendChild(path);
+    });
+
+    return svg;
+}
+
+function createProductTreeRefreshSvg(size = 16) {
+    const svgNS = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(svgNS, 'svg');
+    svg.setAttribute('xmlns', svgNS);
+    svg.setAttribute('width', String(size));
+    svg.setAttribute('height', String(size));
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('fill', 'none');
+    svg.setAttribute('stroke', 'currentColor');
+    svg.setAttribute('stroke-width', '2');
+    svg.setAttribute('stroke-linecap', 'round');
+    svg.setAttribute('stroke-linejoin', 'round');
+
+    const arc = document.createElementNS(svgNS, 'path');
+    arc.setAttribute('d', 'M21 12a9 9 0 0 1-15.5 6.2');
+    const arrow = document.createElementNS(svgNS, 'path');
+    arrow.setAttribute('d', 'M3 12a9 9 0 0 1 15.5-6.2');
+    const head1 = document.createElementNS(svgNS, 'path');
+    head1.setAttribute('d', 'M18 3v4h4');
+    const head2 = document.createElementNS(svgNS, 'path');
+    head2.setAttribute('d', 'M6 21v-4H2');
+
+    svg.appendChild(arc);
+    svg.appendChild(arrow);
+    svg.appendChild(head1);
+    svg.appendChild(head2);
+    return svg;
+}
+
+function makeProductTreeUrl(path) {
+    try {
+        return new URL(path, window.location.origin).href;
+    } catch (_) {
+        return '';
+    }
+}
+
+function normalizeProductTreeUrl(url) {
+    if (!url) return '';
+    try {
+        const parsed = new URL(url, window.location.href);
+        parsed.hash = '';
+        parsed.search = '';
+        if (!parsed.pathname.endsWith('/')) parsed.pathname += '/';
+        return parsed.href;
+    } catch (_) {
+        return '';
+    }
+}
+
+function getProductTreePathParts(url) {
+    try {
+        const parsed = new URL(url, window.location.href);
+        return parsed.pathname.split('/').filter(Boolean);
+    } catch (_) {
+        return [];
+    }
+}
+
+function getProductTreeDepth(url) {
+    return getProductTreePathParts(url).length;
+}
+
+function productTreeHumanizeSegment(segment) {
+    const decoded = decodeURIComponent(String(segment || ''));
+    const text = normalizeWhitespace(decoded.replace(/-/g, ' '));
+    return text ? text.charAt(0).toUpperCase() + text.slice(1) : '';
+}
+
+function createProductTreeNode(title, url = '') {
+    return {
+        title: normalizeWhitespace(title || ''),
+        url: normalizeProductTreeUrl(url),
+        children: []
+    };
+}
+
+function getProductTreeConfigKey(config) {
+    return normalizeProductTreeText(config && config.title);
+}
+
+function getProductTreeRootUrls(config) {
+    return (config.roots || [])
+        .map(root => ({
+            title: root.title || config.title,
+            url: normalizeProductTreeUrl(makeProductTreeUrl(root.path || root.url || ''))
+        }))
+        .filter(root => root.url);
+}
+
+function isProductTreeUrlUnderConfig(url, config) {
+    const normalized = normalizeProductTreeUrl(url);
+    if (!normalized) return false;
+    return getProductTreeRootUrls(config).some(root => normalized.startsWith(root.url));
+}
+
+function getProductTreeConfigForMenuItem(item) {
+    if (!item) return null;
+    const menuId = item.dataset ? normalizeWhitespace(item.dataset.id || '') : '';
+    const anchor = item.querySelector('a');
+    const text = normalizeProductTreeText(anchor ? (anchor.getAttribute('title') || anchor.textContent) : item.textContent);
+
+    return PRODUCT_TREE_TOP_CATEGORIES.find(config => {
+        if (menuId && config.menuId === menuId) return true;
+        const labels = [config.title, ...(config.aliases || [])].map(normalizeProductTreeText);
+        return labels.includes(text);
+    }) || null;
+}
+
+function injectProductTreeButtons() {
+    if (!document.body) return;
+    document.querySelectorAll('.top-menu-item').forEach(item => {
+        const config = getProductTreeConfigForMenuItem(item);
+        if (!config || item.querySelector('.les-product-tree-open-btn')) return;
+
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'les-product-tree-open-btn';
+        button.title = `Open ${config.title} tree`;
+        button.setAttribute('aria-label', `Open ${config.title} tree`);
+        button.appendChild(createProductTreeSvg(15));
+        button.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            openProductTreeModal(config);
+        });
+
+        item.classList.add('les-product-tree-menu-item');
+        const icon = item.querySelector(':scope > i');
+        const anchor = item.querySelector(':scope > a');
+        if (icon) {
+            item.insertBefore(button, icon);
+        } else if (anchor && anchor.nextSibling) {
+            item.insertBefore(button, anchor.nextSibling);
+        } else {
+            item.appendChild(button);
+        }
+    });
+}
+
+function formatExternalServiceError(error) {
+    const message = (error && error.message) ? error.message : String(error || '');
+    if (message === 'external_services_consent_required') {
+        return 'Allow external services in Settings before translating text.';
+    }
+    return message || 'unknown_error';
+}
+
+function cleanupProductTreeUi() {
+    document.querySelectorAll('.les-product-tree-open-btn').forEach(button => button.remove());
+    document.querySelectorAll('.les-product-tree-menu-item').forEach(item => item.classList.remove('les-product-tree-menu-item'));
+    closeProductTreeModal();
+}
+
+function closeProductTreeModal() {
+    const modal = document.querySelector('.les-product-tree-modal-backdrop');
+    if (modal) modal.remove();
+    document.body.classList.remove('les-product-tree-modal-open');
+    if (productTreeModalKeyHandler) {
+        document.removeEventListener('keydown', productTreeModalKeyHandler);
+        productTreeModalKeyHandler = null;
+    }
+}
+
+function ensureProductTreeModal(config) {
+    closeProductTreeModal();
+
+    const backdrop = document.createElement('div');
+    backdrop.className = 'les-product-tree-modal-backdrop';
+
+    const modal = document.createElement('div');
+    modal.className = 'les-product-tree-modal';
+    modal.setAttribute('role', 'dialog');
+    modal.setAttribute('aria-modal', 'true');
+    modal.setAttribute('aria-label', `${config.title} tree`);
+
+    const header = document.createElement('div');
+    header.className = 'les-product-tree-modal-header';
+
+    const titleWrap = document.createElement('div');
+    const title = document.createElement('h2');
+    title.textContent = config.title;
+    const status = document.createElement('div');
+    status.className = 'les-product-tree-status';
+    status.textContent = '';
+    titleWrap.appendChild(title);
+    titleWrap.appendChild(status);
+
+    const actions = document.createElement('div');
+    actions.className = 'les-product-tree-modal-actions';
+
+    const refresh = document.createElement('button');
+    refresh.type = 'button';
+    refresh.className = 'les-product-tree-icon-btn les-product-tree-refresh';
+    refresh.title = 'Reload tree';
+    refresh.setAttribute('aria-label', 'Reload tree');
+    refresh.appendChild(createProductTreeRefreshSvg(16));
+
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'les-product-tree-icon-btn les-product-tree-close';
+    close.title = 'Close';
+    close.setAttribute('aria-label', 'Close');
+    close.textContent = '×';
+
+    actions.appendChild(refresh);
+    actions.appendChild(close);
+    header.appendChild(titleWrap);
+    header.appendChild(actions);
+
+    const toolbar = document.createElement('div');
+    toolbar.className = 'les-product-tree-toolbar';
+
+    const search = document.createElement('input');
+    search.type = 'search';
+    search.className = 'les-product-tree-filter';
+    search.placeholder = 'Filter categories';
+    search.setAttribute('aria-label', 'Filter categories');
+
+    const rootUrls = getProductTreeRootUrls(config);
+    const rootLink = document.createElement('a');
+    rootLink.className = 'les-product-tree-root-link';
+    rootLink.href = rootUrls[0] ? rootUrls[0].url : '#';
+    rootLink.target = '_blank';
+    rootLink.rel = 'noopener noreferrer';
+    rootLink.textContent = 'Open root';
+    if (!rootUrls[0]) rootLink.hidden = true;
+
+    toolbar.appendChild(search);
+    toolbar.appendChild(rootLink);
+
+    const body = document.createElement('div');
+    body.className = 'les-product-tree-modal-body';
+
+    modal.appendChild(header);
+    modal.appendChild(toolbar);
+    modal.appendChild(body);
+    backdrop.appendChild(modal);
+
+    backdrop.addEventListener('click', (event) => {
+        if (event.target === backdrop) closeProductTreeModal();
+    });
+    close.addEventListener('click', closeProductTreeModal);
+    refresh.addEventListener('click', () => loadProductTreeIntoModal(backdrop, config, true));
+    search.addEventListener('input', () => filterProductTree(backdrop, search.value));
+
+    productTreeModalKeyHandler = (event) => {
+        if (event.key === 'Escape') closeProductTreeModal();
+    };
+    document.addEventListener('keydown', productTreeModalKeyHandler);
+
+    document.body.appendChild(backdrop);
+    document.body.classList.add('les-product-tree-modal-open');
+    search.focus({ preventScroll: true });
+    return backdrop;
+}
+
+function renderProductTreeLoading(modal, message) {
+    const body = modal.querySelector('.les-product-tree-modal-body');
+    const status = modal.querySelector('.les-product-tree-status');
+    if (status) status.textContent = normalizeWhitespace(message || 'Loading tree...');
+    if (!body) return;
+    body.innerHTML = `
+        <div class="les-product-tree-loading">
+            <div class="lekolar-spinner"></div>
+            <span>Loading tree...</span>
+        </div>
+    `;
+}
+
+function renderProductTreeError(modal, message) {
+    const body = modal.querySelector('.les-product-tree-modal-body');
+    const status = modal.querySelector('.les-product-tree-status');
+    if (status) status.textContent = 'Could not load tree';
+    if (!body) return;
+    body.innerHTML = '';
+    const error = document.createElement('div');
+    error.className = 'les-product-tree-empty';
+    error.textContent = message || 'Could not load category tree.';
+    body.appendChild(error);
+}
+
+function isProductTreeChildUrl(parentUrl, childUrl, config) {
+    const parent = normalizeProductTreeUrl(parentUrl);
+    const child = normalizeProductTreeUrl(childUrl);
+    if (!parent || !child || parent === child) return false;
+    if (!isProductTreeUrlUnderConfig(child, config)) return false;
+    if (!child.startsWith(parent)) return false;
+    return getProductTreeDepth(child) === getProductTreeDepth(parent) + 1;
+}
+
+function getProductTreeLinkTitle(anchor) {
+    if (!anchor) return '';
+    const title = normalizeWhitespace(anchor.getAttribute('title') || anchor.getAttribute('aria-label') || '');
+    if (title) return title;
+    const clone = anchor.cloneNode(true);
+    clone.querySelectorAll('img, svg, i, button').forEach(el => el.remove());
+    return normalizeWhitespace(clone.textContent || '');
+}
+
+function extractProductTreeChildLinks(doc, parentUrl, config) {
+    const selectors = [
+        '.category-button-navigation a.category-button[href]',
+        '.category-button-navigation a[href]',
+        '.category-navigation a.category-button[href]',
+        '.category-navigation .card a[href]',
+        '.category-page .on-screen-navigation a[href]',
+        '.category-page .category-navigation a[href]'
+    ];
+    let anchors = [];
+    selectors.forEach(selector => {
+        anchors.push(...Array.from(doc.querySelectorAll(selector)));
+    });
+
+    if (anchors.length === 0) {
+        const root = doc.querySelector('.category-page, main, .wrapper.main') || doc.body || doc;
+        anchors = Array.from(root.querySelectorAll('a[href*="/verkkokauppa/"]'));
+    }
+
+    const seen = new Set();
+    const links = [];
+    anchors.forEach(anchor => {
+        const url = normalizeProductTreeUrl(anchor.href || anchor.getAttribute('href'));
+        if (!url || seen.has(url)) return;
+        if (!isProductTreeChildUrl(parentUrl, url, config)) return;
+        if (anchor.closest('.product-tiles, .product-list, .products-grid, .category-product, .product-item, .product-list-item, .price-buy-info, .buy-info')) return;
+
+        const title = getProductTreeLinkTitle(anchor);
+        if (!title) return;
+
+        seen.add(url);
+        links.push({ title, url });
+    });
+    return links;
+}
+
+function addProductTreePath(root, config, url, title) {
+    const normalized = normalizeProductTreeUrl(url);
+    const rootUrls = getProductTreeRootUrls(config);
+    const rootMatch = rootUrls.find(rootUrl => normalized.startsWith(rootUrl.url));
+    if (!rootMatch) return;
+
+    const baseParts = getProductTreePathParts(rootMatch.url);
+    const parts = getProductTreePathParts(normalized).slice(baseParts.length);
+    let current = root;
+
+    if (rootUrls.length > 1) {
+        let group = current.children.find(child => child.url === rootMatch.url);
+        if (!group) {
+            group = createProductTreeNode(rootMatch.title, rootMatch.url);
+            current.children.push(group);
+        }
+        current = group;
+    }
+
+    if (parts.length === 0) return;
+    parts.forEach((part, index) => {
+        const isLast = index === parts.length - 1;
+        const nextUrl = new URL(rootMatch.url);
+        const nextParts = [...baseParts, ...parts.slice(0, index + 1)];
+        nextUrl.pathname = `/${nextParts.join('/')}/`;
+        const nodeUrl = normalizeProductTreeUrl(nextUrl.href);
+        let child = current.children.find(item => item.url === nodeUrl);
+        if (!child) {
+            child = createProductTreeNode(isLast ? title : productTreeHumanizeSegment(part), nodeUrl);
+            current.children.push(child);
+        } else if (isLast && title) {
+            child.title = title;
+        }
+        current = child;
+    });
+}
+
+function buildProductTreeFromLoadedLinks(config) {
+    const root = createProductTreeNode(config.title, '');
+    const anchors = Array.from(document.querySelectorAll(
+        '.js-headerAssortmentPlaceholder a[href], .js-mega-menu a[href], .mega-menu a[href], .category-button-navigation a[href], .breadcrumb a[href]'
+    ));
+
+    anchors.forEach(anchor => {
+        const url = normalizeProductTreeUrl(anchor.href || anchor.getAttribute('href'));
+        if (!url || !isProductTreeUrlUnderConfig(url, config)) return;
+        addProductTreePath(root, config, url, getProductTreeLinkTitle(anchor));
+    });
+
+    return countProductTreeNodes(root) > 0 ? root : null;
+}
+
+async function getProductTreeDocument(url) {
+    const normalized = normalizeProductTreeUrl(url);
+    if (normalized && normalized === normalizeProductTreeUrl(window.location.href)) {
+        return document;
+    }
+    return fetchHtmlDocument(normalized || url);
+}
+
+async function resolveProductTree(config, options = {}) {
+    const cacheKey = getProductTreeConfigKey(config);
+    const cached = productTreeCache.get(cacheKey);
+    if (!options.forceRefresh && cached && Date.now() - cached.checkedAt < PRODUCT_TREE_CACHE_TTL_MS) {
+        return cached.tree;
+    }
+
+    const rootUrls = getProductTreeRootUrls(config);
+    const tree = createProductTreeNode(config.title, rootUrls.length === 1 ? rootUrls[0].url : '');
+    const queue = [];
+    const visited = new Set();
+    let pageCount = 0;
+    let hitLimit = false;
+
+    rootUrls.forEach(rootUrl => {
+        if (rootUrls.length > 1) {
+            const group = createProductTreeNode(rootUrl.title, rootUrl.url);
+            tree.children.push(group);
+            queue.push({ node: group, url: rootUrl.url, depth: 0 });
+        } else {
+            queue.push({ node: tree, url: rootUrl.url, depth: 0 });
+        }
+    });
+
+    while (queue.length > 0) {
+        if (pageCount >= PRODUCT_TREE_MAX_PAGES) {
+            hitLimit = true;
+            break;
+        }
+
+        const current = queue.shift();
+        const normalizedUrl = normalizeProductTreeUrl(current.url);
+        if (!normalizedUrl || visited.has(normalizedUrl) || current.depth > PRODUCT_TREE_MAX_DEPTH) continue;
+
+        visited.add(normalizedUrl);
+        pageCount += 1;
+        if (typeof options.onProgress === 'function') {
+            options.onProgress(`Scanning ${pageCount} pages...`);
+        }
+
+        let doc;
+        try {
+            doc = await getProductTreeDocument(normalizedUrl);
+        } catch (error) {
+            if (current.depth === 0 && countProductTreeNodes(tree) === 0) {
+                const loadedTree = buildProductTreeFromLoadedLinks(config);
+                if (loadedTree) return loadedTree;
+                throw error;
+            }
+            continue;
+        }
+
+        const children = extractProductTreeChildLinks(doc, normalizedUrl, config);
+        children.forEach(childLink => {
+            let child = current.node.children.find(item => item.url === childLink.url);
+            if (!child) {
+                child = createProductTreeNode(childLink.title, childLink.url);
+                current.node.children.push(child);
+            }
+            if (!visited.has(child.url) && current.depth < PRODUCT_TREE_MAX_DEPTH) {
+                queue.push({ node: child, url: child.url, depth: current.depth + 1 });
+            }
+        });
+    }
+
+    tree.__lesStats = {
+        pages: pageCount,
+        hitLimit
+    };
+
+    if (countProductTreeNodes(tree) === 0) {
+        const loadedTree = buildProductTreeFromLoadedLinks(config);
+        if (loadedTree) return loadedTree;
+    }
+
+    productTreeCache.set(cacheKey, { tree, checkedAt: Date.now() });
+    return tree;
+}
+
+function countProductTreeNodes(node) {
+    if (!node || !node.children) return 0;
+    return node.children.reduce((sum, child) => sum + 1 + countProductTreeNodes(child), 0);
+}
+
+function createProductTreeList(nodes, level = 0) {
+    const list = document.createElement('ul');
+    list.className = level === 0 ? 'les-product-tree-list les-product-tree-root-list' : 'les-product-tree-list';
+
+    nodes.forEach(node => {
+        const item = document.createElement('li');
+        item.className = 'les-product-tree-item';
+        item.dataset.treeText = normalizeProductTreeText(node.title);
+
+        const line = document.createElement('div');
+        line.className = 'les-product-tree-line';
+
+        if (node.url) {
+            const link = document.createElement('a');
+            link.href = node.url;
+            link.target = '_blank';
+            link.rel = 'noopener noreferrer';
+            link.textContent = node.title;
+            line.appendChild(link);
+        } else {
+            const label = document.createElement('span');
+            label.textContent = node.title;
+            line.appendChild(label);
+        }
+
+        if (node.children && node.children.length > 0) {
+            const count = document.createElement('span');
+            count.className = 'les-product-tree-child-count';
+            count.textContent = String(countProductTreeNodes(node));
+            line.appendChild(count);
+            item.appendChild(line);
+            item.appendChild(createProductTreeList(node.children, level + 1));
+        } else {
+            item.appendChild(line);
+        }
+
+        list.appendChild(item);
+    });
+
+    return list;
+}
+
+function renderProductTree(modal, tree) {
+    const body = modal.querySelector('.les-product-tree-modal-body');
+    const status = modal.querySelector('.les-product-tree-status');
+    if (!body) return;
+    body.innerHTML = '';
+
+    const total = countProductTreeNodes(tree);
+    if (status) {
+        const pages = tree.__lesStats && tree.__lesStats.pages ? `, ${tree.__lesStats.pages} pages scanned` : '';
+        const limited = tree.__lesStats && tree.__lesStats.hitLimit ? ', limited' : '';
+        status.textContent = `${total} categories${pages}${limited}`;
+    }
+
+    if (!tree.children || tree.children.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'les-product-tree-empty';
+        empty.textContent = 'No category links found.';
+        body.appendChild(empty);
+        return;
+    }
+
+    const board = document.createElement('div');
+    board.className = 'les-product-tree-board';
+    board.appendChild(createProductTreeList(tree.children));
+    body.appendChild(board);
+}
+
+function filterProductTree(modal, rawQuery) {
+    const query = normalizeProductTreeText(rawQuery);
+    const items = Array.from(modal.querySelectorAll('.les-product-tree-item'));
+
+    if (!query) {
+        items.forEach(item => { item.hidden = false; });
+        return;
+    }
+
+    [...items].reverse().forEach(item => {
+        const ownMatch = (item.dataset.treeText || '').includes(query);
+        const childMatch = Array.from(item.children).some(child =>
+            child.classList && child.classList.contains('les-product-tree-list') &&
+            Array.from(child.children).some(grandChild => !grandChild.hidden)
+        );
+        item.hidden = !(ownMatch || childMatch);
+    });
+}
+
+async function loadProductTreeIntoModal(modal, config, forceRefresh = false) {
+    renderProductTreeLoading(modal, 'Loading tree...');
+    const refresh = modal.querySelector('.les-product-tree-refresh');
+    if (refresh) refresh.disabled = true;
+    try {
+        const tree = await resolveProductTree(config, {
+            forceRefresh,
+            onProgress: (message) => {
+                const status = modal.querySelector('.les-product-tree-status');
+                if (status) status.textContent = message;
+            }
+        });
+        renderProductTree(modal, tree);
+        filterProductTree(modal, modal.querySelector('.les-product-tree-filter')?.value || '');
+    } catch (error) {
+        renderProductTreeError(modal, (error && error.message) ? error.message : 'Could not load category tree.');
+    } finally {
+        if (refresh) refresh.disabled = false;
+    }
+}
+
+function openProductTreeModal(config) {
+    if (!config || !document.body) return;
+    const modal = ensureProductTreeModal(config);
+    loadProductTreeIntoModal(modal, config, false);
+}
+
+function initProductTreeExplorer() {
+    if (!document.body) return;
+    injectProductTreeButtons();
+}
+
+// --- Product Comparison ---
+
+const COMPARE_STORAGE_KEY = 'lesProductComparisonItems';
+const COMPARE_MIN_ITEMS = 2;
+const COMPARE_MAX_ITEMS = 4;
+const comparisonDetailsCache = new Map();
+const productNumberFetchPromises = new Map();
+let comparisonItems = [];
+let comparisonStateLoaded = false;
+let comparisonStateLoadPromise = null;
+let comparisonUiRefreshQueued = false;
+
+function normalizeCompareUrl(url) {
+    if (!url) return '';
+    try {
+        const parsed = new URL(url, window.location.href);
+        const variant = parsed.searchParams.get('variant');
+        parsed.hash = '';
+        parsed.search = '';
+        if (variant) parsed.searchParams.set('variant', variant);
+        return parsed.href;
+    } catch (_) {
+        return String(url || '').trim();
+    }
+}
+
+function getCompareItemId(item) {
+    return (item && item.id) || `url:${normalizeCompareUrl(item && item.url)}`;
+}
+
+function sanitizeCompareItem(raw) {
+    if (!raw || !raw.url) return null;
+
+    const url = normalizeCompareUrl(raw.url);
+    const name = normalizeWhitespace(raw.name || raw.title || '');
+    if (!url || !name) return null;
+
+    return {
+        id: raw.id || `url:${url}`,
+        url,
+        name,
+        imageUrl: raw.imageUrl || '',
+        articleNumber: normalizeWhitespace(raw.articleNumber || ''),
+        shortDescription: normalizeWhitespace(raw.shortDescription || raw.description || ''),
+        flags: Array.isArray(raw.flags) ? uniqueNonEmpty(raw.flags).slice(0, 8) : [],
+        source: raw.source || 'unknown',
+        dimensions: raw.dimensions || {},
+        materials: Array.isArray(raw.materials) ? uniqueNonEmpty(raw.materials) : [],
+        environmentalLabels: Array.isArray(raw.environmentalLabels) ? uniqueNonEmpty(raw.environmentalLabels) : [],
+        toxicFree: raw.toxicFree || '',
+        series: normalizeWhitespace(raw.series || ''),
+        seatHeight: normalizeWhitespace(raw.seatHeight || ''),
+        productProperties: Array.isArray(raw.productProperties) ? raw.productProperties : [],
+        loadError: raw.loadError || '',
+        fetchedAt: raw.fetchedAt || 0
+    };
+}
+
+function uniqueNonEmpty(values) {
+    const seen = new Set();
+    const result = [];
+    values.forEach(value => {
+        const text = normalizeWhitespace(value);
+        if (!text) return;
+        const key = text.toLowerCase();
+        if (seen.has(key)) return;
+        seen.add(key);
+        result.push(text);
+    });
+    return result;
+}
+
+function ensureComparisonStateLoaded() {
+    if (comparisonStateLoaded) return Promise.resolve(comparisonItems);
+    if (comparisonStateLoadPromise) return comparisonStateLoadPromise;
+
+    comparisonStateLoadPromise = storageLocalGet(COMPARE_STORAGE_KEY)
+        .then(data => {
+            const stored = data && Array.isArray(data[COMPARE_STORAGE_KEY]) ? data[COMPARE_STORAGE_KEY] : [];
+            comparisonItems = stored
+                .map(sanitizeCompareItem)
+                .filter(Boolean)
+                .slice(0, COMPARE_MAX_ITEMS);
+            comparisonStateLoaded = true;
+            return comparisonItems;
+        })
+        .catch(error => {
+            console.warn('LES: Could not load product comparison state', error);
+            comparisonItems = [];
+            comparisonStateLoaded = true;
+            return comparisonItems;
+        })
+        .finally(() => {
+            comparisonStateLoadPromise = null;
+        });
+
+    return comparisonStateLoadPromise;
+}
+
+function persistComparisonState() {
+    return storageLocalSet({ [COMPARE_STORAGE_KEY]: comparisonItems }).catch(error => {
+        console.warn('LES: Could not save product comparison state', error);
+    });
+}
+
+function queueComparisonUiRefresh() {
+    if (comparisonUiRefreshQueued) return;
+    comparisonUiRefreshQueued = true;
+    setTimeout(() => {
+        comparisonUiRefreshQueued = false;
+        renderComparePanel();
+        syncCompareButtons();
+    }, 0);
+}
+
+function findComparisonIndex(itemOrId) {
+    const id = typeof itemOrId === 'string' ? itemOrId : getCompareItemId(itemOrId);
+    const url = typeof itemOrId === 'string' ? '' : normalizeCompareUrl(itemOrId && itemOrId.url);
+    const articleNumber = typeof itemOrId === 'string' ? '' : normalizeWhitespace(itemOrId && itemOrId.articleNumber);
+
+    return comparisonItems.findIndex(item => {
+        if (item.id === id) return true;
+        if (url && item.url === url) return true;
+        return Boolean(articleNumber && item.articleNumber && item.articleNumber === articleNumber);
+    });
+}
+
+function isCompareItemSelected(itemOrId) {
+    return findComparisonIndex(itemOrId) >= 0;
+}
+
+async function toggleCompareItem(rawItem) {
+    await ensureComparisonStateLoaded();
+
+    const item = sanitizeCompareItem(rawItem);
+    if (!item) return;
+
+    const existingIndex = findComparisonIndex(item);
+    if (existingIndex >= 0) {
+        comparisonItems.splice(existingIndex, 1);
+        await persistComparisonState();
+        queueComparisonUiRefresh();
+        return;
+    }
+
+    if (comparisonItems.length >= COMPARE_MAX_ITEMS) {
+        showCompareToast(`You can compare up to ${COMPARE_MAX_ITEMS} products at once.`);
+        return;
+    }
+
+    comparisonItems.push(item);
+    await persistComparisonState();
+    queueComparisonUiRefresh();
+}
+
+function showCompareToast(message) {
+    let toast = document.querySelector('.les-compare-toast');
+    if (!toast) {
+        toast = document.createElement('div');
+        toast.className = 'les-compare-toast';
+        document.body.appendChild(toast);
+    }
+    toast.textContent = message;
+    toast.classList.add('is-visible');
+    clearTimeout(showCompareToast.timer);
+    showCompareToast.timer = setTimeout(() => {
+        toast.classList.remove('is-visible');
+    }, 2600);
+}
+
+function createCompareSvg(size = 14) {
+    const svgNS = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(svgNS, 'svg');
+    svg.setAttribute('width', String(size));
+    svg.setAttribute('height', String(size));
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('fill', 'none');
+    svg.setAttribute('stroke', 'currentColor');
+    svg.setAttribute('stroke-width', '2');
+    svg.setAttribute('stroke-linecap', 'round');
+    svg.setAttribute('stroke-linejoin', 'round');
+
+    const top = document.createElementNS(svgNS, 'path');
+    top.setAttribute('d', 'M18 7H6');
+    const topHeadA = document.createElementNS(svgNS, 'path');
+    topHeadA.setAttribute('d', 'M9 4 6 7l3 3');
+    const bottom = document.createElementNS(svgNS, 'path');
+    bottom.setAttribute('d', 'M6 17h12');
+    const bottomHeadA = document.createElementNS(svgNS, 'path');
+    bottomHeadA.setAttribute('d', 'm15 14 3 3-3 3');
+    svg.appendChild(top);
+    svg.appendChild(topHeadA);
+    svg.appendChild(bottom);
+    svg.appendChild(bottomHeadA);
+    return svg;
+}
+
+function createCartSvg(size = 16) {
+    const svgNS = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(svgNS, 'svg');
+    svg.setAttribute('width', String(size));
+    svg.setAttribute('height', String(size));
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('fill', 'none');
+    svg.setAttribute('stroke', 'currentColor');
+    svg.setAttribute('stroke-width', '2');
+    svg.setAttribute('stroke-linecap', 'round');
+    svg.setAttribute('stroke-linejoin', 'round');
+    svg.classList.add('les-card-action-icon');
+
+    const circle1 = document.createElementNS(svgNS, 'circle');
+    circle1.setAttribute('cx', '9');
+    circle1.setAttribute('cy', '21');
+    circle1.setAttribute('r', '1');
+    const circle2 = document.createElementNS(svgNS, 'circle');
+    circle2.setAttribute('cx', '20');
+    circle2.setAttribute('cy', '21');
+    circle2.setAttribute('r', '1');
+    const path = document.createElementNS(svgNS, 'path');
+    path.setAttribute('d', 'M1 1h4l2.7 13.4a2 2 0 0 0 2 1.6h8.7a2 2 0 0 0 2-1.6L23 6H6');
+    svg.appendChild(circle1);
+    svg.appendChild(circle2);
+    svg.appendChild(path);
+    return svg;
+}
+
+function createCopySvg(size = 16) {
+    const svgNS = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(svgNS, 'svg');
+    svg.setAttribute('width', String(size));
+    svg.setAttribute('height', String(size));
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('fill', 'none');
+    svg.setAttribute('stroke', 'currentColor');
+    svg.setAttribute('stroke-width', '2');
+    svg.setAttribute('stroke-linecap', 'round');
+    svg.setAttribute('stroke-linejoin', 'round');
+
+    const rect1 = document.createElementNS(svgNS, 'rect');
+    rect1.setAttribute('x', '9');
+    rect1.setAttribute('y', '9');
+    rect1.setAttribute('width', '13');
+    rect1.setAttribute('height', '13');
+    rect1.setAttribute('rx', '2');
+    rect1.setAttribute('ry', '2');
+    const path = document.createElementNS(svgNS, 'path');
+    path.setAttribute('d', 'M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1');
+
+    svg.appendChild(rect1);
+    svg.appendChild(path);
+    return svg;
+}
+
+function insertCardAction(toolbar, element, order) {
+    if (!toolbar || !element) return;
+    element.dataset.lesActionOrder = String(order);
+
+    const next = Array.from(toolbar.children).find(child => {
+        if (child === element) return false;
+        const childOrder = Number(child.dataset.lesActionOrder || 999);
+        return childOrder > order;
+    });
+
+    toolbar.insertBefore(element, next || null);
+}
+
+function findNativeCardBuyControl(card) {
+    if (!card) return null;
+    return card.querySelector(
+        '.price-buy-info .buy-info .product-buy-button, .price-buy-info .buy-info .product-more-info, .price-buy-info .buy-info .js-productBuyButton, ' +
+        '.price-buy-info .js-buyInfo .product-buy-button, .price-buy-info .js-buyInfo .product-more-info, .price-buy-info .js-buyInfo .js-productBuyButton, ' +
+        '.buy-info .product-buy-button, .buy-info .product-more-info, .buy-info .js-productBuyButton, ' +
+        '.js-buyInfo .product-buy-button, .js-buyInfo .product-more-info, .js-buyInfo .js-productBuyButton'
+    );
+}
+
+function triggerNativeCardBuy(card) {
+    const control = findNativeCardBuyControl(card);
+    if (!control) return;
+    control.click();
+}
+
+function ensureCardCartProxy(card, toolbar) {
+    if (!card || !toolbar) return;
+    if (!findNativeCardBuyControl(card)) return;
+
+    let button = card.querySelector('.les-card-cart-proxy');
+    if (!button) {
+        button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'les-card-action-btn les-card-cart-proxy';
+        button.appendChild(createCartSvg(16));
+        button.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            triggerNativeCardBuy(card);
+        });
+    }
+
+    button.title = 'Add to cart or choose option';
+    button.setAttribute('aria-label', 'Add to cart or choose option');
+    insertCardAction(toolbar, button, 40);
+}
+
+function ensureCardActionToolbar(card) {
+    if (!card || !isListPage()) return null;
+
+    let toolbar = card.querySelector('.les-card-actions');
+    if (!toolbar) {
+        toolbar = document.createElement('div');
+        toolbar.className = 'les-card-actions';
+
+        const anchor =
+            card.querySelector('.price-buy-info') ||
+            card.querySelector('.product-info') ||
+            card.querySelector('.product-artno, .eS-product-artno, [class*="artno"]');
+
+        if (anchor && anchor.parentElement && anchor.matches('.price-buy-info')) {
+            anchor.insertAdjacentElement('beforebegin', toolbar);
+        } else if (anchor && anchor.parentElement) {
+            anchor.insertAdjacentElement('afterend', toolbar);
+        } else {
+            card.appendChild(toolbar);
+        }
+    }
+
+    card.classList.add('les-compact-card-actions');
+    ensureCardCartProxy(card, toolbar);
+
+    return toolbar;
+}
+
+function createCompareButton(meta, className) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = className;
+    button.dataset.compareId = meta.id;
+    button.__lesCompareMeta = meta;
+    button.setAttribute('aria-pressed', 'false');
+
+    const label = document.createElement('span');
+    label.className = 'les-compare-btn-label';
+    button.appendChild(createCompareSvg(14));
+    button.appendChild(label);
+
+    button.addEventListener('click', async (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        await toggleCompareItem(button.__lesCompareMeta);
+    });
+
+    updateCompareButtonState(button);
+    return button;
+}
+
+function updateCompareButtonState(button) {
+    if (!button) return;
+    const selected = isCompareItemSelected(button.__lesCompareMeta || button.dataset.compareId);
+    const label = button.querySelector('.les-compare-btn-label');
+    button.classList.toggle('is-selected', selected);
+    button.setAttribute('aria-pressed', selected ? 'true' : 'false');
+    button.title = selected ? 'Remove from comparison' : 'Add to comparison';
+    button.setAttribute('aria-label', selected ? 'Remove from comparison' : 'Add to comparison');
+    if (label) label.textContent = selected ? 'Selected' : 'Compare';
+}
+
+function syncCompareButtons() {
+    document.querySelectorAll('.les-compare-card-btn, .les-product-compare-btn').forEach(updateCompareButtonState);
+}
+
+function getProductCardDescription(card) {
+    if (!card) return '';
+    const description = card.querySelector('.inner-info-description, .product-description, .description');
+    return description ? normalizeWhitespace(description.textContent || '') : '';
+}
+
+function getProductCardImageUrl(card) {
+    if (!card) return '';
+    const image = card.querySelector('.center-image img, img.imgBox, img.product-image, img[src]');
+    const src = image ? image.getAttribute('src') : '';
+    if (!src) return '';
+    try {
+        return new URL(src, window.location.href).href;
+    } catch (_) {
+        return src;
+    }
+}
+
+function extractProductNumberFromCard(card) {
+    if (!card) return '';
+
+    const copyBtn = card.querySelector('.les-card-copy-btn[data-value], .lekolar-copy-btn[data-type="number"][data-value]');
+    if (copyBtn && copyBtn.dataset.value) return normalizeWhitespace(copyBtn.dataset.value);
+
+    const dataEl = card.querySelector('[data-articlenumber], [data-article-number], [data-articlenr]');
+    if (dataEl) {
+        const value = dataEl.dataset.articlenumber || dataEl.dataset.articleNumber || dataEl.dataset.articlenr || '';
+        if (value) return normalizeWhitespace(value);
+    }
+
+    const text = normalizeWhitespace((card.querySelector('.product-artno, .eS-product-artno, [class*="artno"]') || card).textContent || '');
+    const match = text.match(/(?:Tuotenro|Art\.nr|Varenr)[\.\s:]*\s*([\d-]+)/i);
+    return match ? match[1] : '';
+}
+
+function setCardProductNumber(card, number, button) {
+    const cleanNumber = normalizeWhitespace(number || '');
+    if (!card || !cleanNumber) return;
+
+    card.querySelectorAll('.les-injected-artno').forEach(el => el.remove());
+
+    if (button) {
+        button.dataset.value = cleanNumber;
+        button.classList.remove('is-loading');
+        button.title = `item ${cleanNumber}`;
+        button.setAttribute('aria-label', `Copy item ${cleanNumber}`);
+    }
+}
+
+async function resolveCardProductNumber(card, button) {
+    const existing = extractProductNumberFromCard(card);
+    if (existing) {
+        setCardProductNumber(card, existing, button);
+        return existing;
+    }
+
+    const url = getProductCardUrl(card);
+    if (!url) return '';
+
+    if (fetchedProducts.has(url)) {
+        const cached = fetchedProducts.get(url);
+        setCardProductNumber(card, cached, button);
+        return cached;
+    }
+
+    if (!productNumberFetchPromises.has(url)) {
+        productNumberFetchPromises.set(url, fetchProductNumberDirect(url).finally(() => {
+            productNumberFetchPromises.delete(url);
+        }));
+    }
+
+    if (button) button.classList.add('is-loading');
+    const number = await productNumberFetchPromises.get(url);
+    if (number) setCardProductNumber(card, number, button);
+    else if (button) button.classList.remove('is-loading');
+    return number || '';
+}
+
+function ensureCardCopyAction(card) {
+    if (!card) return;
+    const toolbar = ensureCardActionToolbar(card);
+    if (!toolbar) return;
+
+    let button = card.querySelector('.les-card-copy-btn');
+    if (!button) {
+        button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'les-card-action-btn les-card-copy-btn';
+        button.title = 'Copy item number';
+        button.setAttribute('aria-label', 'Copy item number');
+        button.appendChild(createCopySvg(16));
+
+        const warmUp = () => {
+            if (!button.dataset.value) resolveCardProductNumber(card, button);
+        };
+        button.addEventListener('mouseenter', warmUp);
+        button.addEventListener('focus', warmUp);
+        button.addEventListener('click', async (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+
+            const number = button.dataset.value || await resolveCardProductNumber(card, button);
+            if (!number) {
+                showCompareToast('Could not find item number.');
+                return;
+            }
+
+            const text = event[currentSettings.secondaryModifierKey] && getProductCardName(card)
+                ? `${number} ${getProductCardName(card)}`
+                : number;
+
+            try {
+                await navigator.clipboard.writeText(text);
+                showCompareToast('Item number copied.');
+            } catch (error) {
+                console.error('LES: Failed to copy card product number', error);
+            }
+        });
+    }
+
+    const existing = extractProductNumberFromCard(card);
+    if (existing) setCardProductNumber(card, existing, button);
+    insertCardAction(toolbar, button, 10);
+}
+
+function extractComparisonSymbolLabels(root) {
+    const labels = [];
+    root.querySelectorAll('.symbols img, .symbols [title], .product-flags img, .product-flags [title], [class*="product-flag"] img').forEach(el => {
+        const text = el.getAttribute('alt') || el.getAttribute('title') || '';
+        if (text) labels.push(text);
+    });
+    return uniqueNonEmpty(labels);
+}
+
+function buildCompareMetaFromCard(card) {
+    const url = getProductCardUrl(card);
+    if (!url) return null;
+
+    const item = sanitizeCompareItem({
+        url,
+        name: getProductCardName(card),
+        imageUrl: getProductCardImageUrl(card),
+        articleNumber: extractProductNumberFromCard(card),
+        shortDescription: getProductCardDescription(card),
+        flags: extractComparisonSymbolLabels(card),
+        source: 'list'
+    });
+
+    return item;
+}
+
+function buildCompareMetaFromCurrentProduct() {
+    if (isListPage()) return null;
+
+    return sanitizeCompareItem({
+        url: window.location.href,
+        name: getProductName(),
+        imageUrl: getMainProductImageUrl(),
+        articleNumber: getMainProductNumber(),
+        shortDescription: extractProductDescriptionFromDoc(document),
+        flags: extractComparisonSymbolLabels(document),
+        source: 'product-page'
+    });
+}
+
+function injectCompareButtonOnCard(card) {
+    if (!card || card.querySelector('.les-compare-card-btn')) return;
+    const meta = buildCompareMetaFromCard(card);
+    if (!meta) return;
+
+    const toolbar = ensureCardActionToolbar(card);
+    if (!toolbar) return;
+
+    const button = createCompareButton(meta, 'les-card-action-btn les-compare-card-btn');
+    insertCardAction(toolbar, button, 30);
+}
+
+function injectCompareButtonOnProductPage() {
+    const meta = buildCompareMetaFromCurrentProduct();
+    if (!meta) return;
+
+    let button = document.querySelector('.les-product-compare-btn');
+    if (!button) {
+        button = createCompareButton(meta, 'les-product-compare-btn');
+    } else {
+        button.dataset.compareId = meta.id;
+        button.__lesCompareMeta = meta;
+        updateCompareButtonState(button);
+    }
+
+    const buttonsBar = ensureProductActionBar();
+    if (buttonsBar && button.parentElement !== buttonsBar) {
+        buttonsBar.insertBefore(button, buttonsBar.firstChild);
+    }
+}
+
+function injectCompareControls() {
+    if (isListPage()) {
+        document.querySelectorAll(PRODUCT_CARD_SELECTOR).forEach(card => {
+            ensureCardActionToolbar(card);
+            if (currentSettings.copyButtons) {
+                injectNameSearchOnCard(card);
+                ensureCardCopyAction(card);
+            }
+            injectCompareButtonOnCard(card);
+        });
+    } else {
+        injectCompareButtonOnProductPage();
+    }
+}
+
+function ensureComparePanel() {
+    let panel = document.querySelector('.les-compare-panel');
+    if (panel) return panel;
+
+    panel = document.createElement('aside');
+    panel.className = 'les-compare-panel';
+    panel.innerHTML = `
+        <div class="les-compare-panel-header">
+            <strong>Product comparison</strong>
+            <span class="les-compare-count">0/${COMPARE_MAX_ITEMS}</span>
+        </div>
+        <div class="les-compare-list"></div>
+        <button type="button" class="les-compare-open-btn">Compare products</button>
+        <button type="button" class="les-compare-clear-btn">Clear</button>
+    `;
+
+    panel.querySelector('.les-compare-open-btn').addEventListener('click', openProductComparison);
+    panel.querySelector('.les-compare-clear-btn').addEventListener('click', async () => {
+        comparisonItems = [];
+        await persistComparisonState();
+        queueComparisonUiRefresh();
+    });
+
+    document.body.appendChild(panel);
+    return panel;
+}
+
+function renderComparePanel() {
+    if (!document.body || !comparisonStateLoaded) return;
+    const panel = ensureComparePanel();
+    const count = panel.querySelector('.les-compare-count');
+    const list = panel.querySelector('.les-compare-list');
+    const openBtn = panel.querySelector('.les-compare-open-btn');
+
+    panel.classList.toggle('is-open', comparisonItems.length > 0);
+    if (count) count.textContent = `${comparisonItems.length}/${COMPARE_MAX_ITEMS}`;
+    if (openBtn) {
+        openBtn.disabled = comparisonItems.length < COMPARE_MIN_ITEMS;
+        openBtn.title = comparisonItems.length < COMPARE_MIN_ITEMS ? 'Select at least 2 products' : 'Open comparison';
+    }
+
+    if (!list) return;
+    list.innerHTML = '';
+    comparisonItems.forEach(item => {
+        const row = document.createElement('div');
+        row.className = 'les-compare-list-item';
+
+        const name = document.createElement('span');
+        name.textContent = item.name;
+        row.appendChild(name);
+
+        const removeBtn = document.createElement('button');
+        removeBtn.type = 'button';
+        removeBtn.textContent = '×';
+        removeBtn.title = 'Remove from comparison';
+        removeBtn.addEventListener('click', async () => {
+            const index = findComparisonIndex(item.id);
+            if (index >= 0) {
+                comparisonItems.splice(index, 1);
+                await persistComparisonState();
+                queueComparisonUiRefresh();
+            }
+        });
+        row.appendChild(removeBtn);
+        list.appendChild(row);
+    });
+}
+
+function closeCompareModal() {
+    const modal = document.querySelector('.les-compare-modal-backdrop');
+    if (modal) modal.remove();
+    document.body.classList.remove('les-compare-modal-open');
+}
+
+function ensureCompareModal() {
+    closeCompareModal();
+
+    const backdrop = document.createElement('div');
+    backdrop.className = 'les-compare-modal-backdrop';
+    backdrop.innerHTML = `
+        <div class="les-compare-modal" role="dialog" aria-modal="true" aria-label="Product comparison">
+            <div class="les-compare-modal-header">
+                <div>
+                    <h2>Product comparison</h2>
+                    <p>Selected products side by side with the details that matter for purchasing.</p>
+                </div>
+                <button type="button" class="les-compare-modal-close" aria-label="Close">×</button>
+            </div>
+            <div class="les-compare-modal-body"></div>
+        </div>
+    `;
+
+    backdrop.addEventListener('click', (event) => {
+        if (event.target === backdrop) closeCompareModal();
+    });
+    backdrop.querySelector('.les-compare-modal-close').addEventListener('click', closeCompareModal);
+    document.body.appendChild(backdrop);
+    document.body.classList.add('les-compare-modal-open');
+    return backdrop;
+}
+
+async function openProductComparison() {
+    await ensureComparisonStateLoaded();
+    if (comparisonItems.length < COMPARE_MIN_ITEMS) {
+        showCompareToast('Select at least 2 products to compare.');
+        return;
+    }
+
+    const modal = ensureCompareModal();
+    renderComparisonLoading(modal);
+
+    const resolvedItems = await Promise.all(comparisonItems.map(async item => {
+        try {
+            return await resolveComparisonItemDetails(item);
+        } catch (error) {
+            return sanitizeCompareItem({
+                ...item,
+                loadError: (error && error.message) ? error.message : 'Could not load details'
+            });
+        }
+    }));
+
+    comparisonItems = resolvedItems.filter(Boolean).slice(0, COMPARE_MAX_ITEMS);
+    await persistComparisonState();
+    renderComparePanel();
+    syncCompareButtons();
+    renderComparisonTable(modal, comparisonItems);
+}
+
+function renderComparisonLoading(modal) {
+    const body = modal.querySelector('.les-compare-modal-body');
+    if (!body) return;
+    body.innerHTML = `
+        <div class="les-compare-loading">
+            <div class="lekolar-spinner"></div>
+            <span>Loading product details...</span>
+        </div>
+    `;
+}
+
+async function resolveComparisonItemDetails(item) {
+    const cacheKey = item.url;
+    if (comparisonDetailsCache.has(cacheKey)) {
+        return comparisonDetailsCache.get(cacheKey);
+    }
+
+    const currentUrl = normalizeCompareUrl(window.location.href);
+    const doc = normalizeCompareUrl(item.url) === currentUrl ? document : await fetchHtmlDocument(item.url);
+    const resolved = buildCompareMetaFromDoc(doc, item.url, item);
+    comparisonDetailsCache.set(cacheKey, resolved);
+    return resolved;
+}
+
+function renderComparisonTable(modal, items) {
+    const body = modal.querySelector('.les-compare-modal-body');
+    if (!body) return;
+    body.innerHTML = '';
+
+    const grid = document.createElement('div');
+    grid.className = 'les-compare-grid';
+    grid.style.gridTemplateColumns = `150px repeat(${items.length}, minmax(170px, 1fr))`;
+
+    const corner = document.createElement('div');
+    corner.className = 'les-compare-grid-corner';
+    corner.textContent = 'Product';
+    grid.appendChild(corner);
+
+    items.forEach(item => {
+        const header = document.createElement('div');
+        header.className = 'les-compare-product-head';
+
+        if (item.imageUrl) {
+            const image = document.createElement('img');
+            image.src = item.imageUrl;
+            image.alt = '';
+            image.loading = 'lazy';
+            header.appendChild(image);
+        }
+
+        const link = document.createElement('a');
+        link.href = item.url;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        link.textContent = item.name;
+        header.appendChild(link);
+
+        const remove = document.createElement('button');
+        remove.type = 'button';
+        remove.textContent = 'Remove';
+        remove.addEventListener('click', async () => {
+            const index = findComparisonIndex(item.id);
+            if (index >= 0) {
+                comparisonItems.splice(index, 1);
+                await persistComparisonState();
+                if (comparisonItems.length < COMPARE_MIN_ITEMS) {
+                    closeCompareModal();
+                } else {
+                    renderComparisonTable(modal, comparisonItems);
+                }
+                queueComparisonUiRefresh();
+            }
+        });
+        header.appendChild(remove);
+        grid.appendChild(header);
+    });
+
+    const rows = [
+        { label: 'Item no.', getValue: item => item.articleNumber },
+        { label: 'Dimensions', getValue: formatComparisonDimensions },
+        { label: 'Materials', getValue: item => item.materials.join('\n') },
+        { label: 'Environmental labels', getValue: item => item.environmentalLabels.join(', ') },
+        { label: 'Toxic-free', getValue: item => item.toxicFree },
+        { label: 'Series', getValue: item => item.series },
+        { label: 'Seat height', getValue: item => item.seatHeight },
+        { label: 'Description', getValue: item => item.shortDescription },
+        { label: 'Load status', getValue: item => item.loadError }
+    ];
+
+    rows.forEach(row => {
+        const values = items.map(item => normalizeWhitespace(row.getValue(item) || ''));
+        if (values.every(value => !value)) return;
+
+        const label = document.createElement('div');
+        label.className = 'les-compare-row-label';
+        label.textContent = row.label;
+        grid.appendChild(label);
+
+        values.forEach(value => {
+            const cell = document.createElement('div');
+            cell.className = 'les-compare-cell';
+            cell.textContent = value || '-';
+            grid.appendChild(cell);
+        });
+    });
+
+    body.appendChild(grid);
+}
+
+function foldCompareText(value) {
+    return normalizeWhitespace(value)
+        .toLowerCase()
+        .replace(/[åäæ]/g, 'a')
+        .replace(/[öø]/g, 'o')
+        .replace(/[éè]/g, 'e');
+}
+
+function compareLabelMatches(label, tokens) {
+    const folded = foldCompareText(label).replace(/:$/, '');
+    return tokens.some(token => folded.includes(foldCompareText(token)));
+}
+
+function extractComparisonProperties(doc) {
+    const properties = [];
+    doc.querySelectorAll('.product-properties li, tr').forEach(row => {
+        const labelEl = row.querySelector('.heading, th, dt, .product-attributes__name');
+        if (!labelEl) return;
+
+        const label = normalizeWhitespace(labelEl.textContent || '').replace(/:$/, '');
+        if (!label) return;
+
+        const colorTitles = Array.from(row.querySelectorAll('.color-bubble[title]')).map(el => el.getAttribute('title'));
+        const clone = row.cloneNode(true);
+        clone.querySelectorAll('.heading, th, dt, .product-attributes__name, .les-spec-checkbox, button').forEach(el => el.remove());
+        const value = normalizeWhitespace(clone.textContent || '') || colorTitles.join(', ');
+        if (!value) return;
+
+        properties.push({ label, value });
+    });
+    return properties;
+}
+
+function getComparisonPropertyValue(properties, tokens, excludeTokens = []) {
+    const row = properties.find(prop => {
+        if (!compareLabelMatches(prop.label, tokens)) return false;
+        return excludeTokens.length === 0 || !compareLabelMatches(prop.label, excludeTokens);
+    });
+    return row ? row.value : '';
+}
+
+function getComparisonPropertyValues(properties, tokens, includeLabel = false) {
+    return uniqueNonEmpty(properties
+        .filter(prop => compareLabelMatches(prop.label, tokens))
+        .map(prop => includeLabel ? `${prop.label}: ${prop.value}` : prop.value));
+}
+
+function formatComparisonDimensions(item) {
+    const dims = item.dimensions || {};
+    const parts = [
+        dims.length ? `Length: ${dims.length}` : '',
+        dims.width ? `Width: ${dims.width}` : '',
+        dims.height ? `Height: ${dims.height}` : '',
+        dims.depth ? `Depth: ${dims.depth}` : '',
+        dims.diameter ? `Diameter: ${dims.diameter}` : ''
+    ];
+    return uniqueNonEmpty(parts).join('\n');
+}
+
+function extractProductDescriptionFromDoc(doc) {
+    const description = doc.querySelector('.product-info .description, .product-description, .js-productInfo .description');
+    if (description) return normalizeWhitespace(description.textContent || '');
+
+    const metaDescription = doc.querySelector('meta[name="description"]');
+    if (metaDescription && metaDescription.content) return normalizeWhitespace(metaDescription.content);
+
+    return '';
+}
+
+function extractProductNameFromDoc(doc) {
+    const h1 = doc.querySelector('.product-info h1, .product-page-wrapper h1, .product-page h1, h1');
+    if (h1) {
+        const clone = h1.cloneNode(true);
+        clone.querySelectorAll('.lekolar-copy-btn, .les-product-name-search-btn, .les-product-compare-btn, .les-product-note-btn').forEach(el => el.remove());
+        const text = normalizeWhitespace(clone.textContent || '');
+        if (text) return text;
+    }
+
+    const ogTitle = doc.querySelector('meta[property="og:title"]');
+    return ogTitle && ogTitle.content ? normalizeWhitespace(ogTitle.content) : '';
+}
+
+function extractProductImageFromDoc(doc, baseUrl) {
+    if (doc === document) return getMainProductImageUrl();
+
+    const imageLink = doc.querySelector('.product-image-wrapper .js-currentImage, .product-image-wrapper .current-image, .product-image-wrapper .js-productImage');
+    const href = imageLink ? imageLink.getAttribute('href') : '';
+    if (href) return new URL(href, baseUrl).href;
+
+    const image = doc.querySelector('.product-image-wrapper img.product-image, .product-image-wrapper img, meta[property="og:image"]');
+    const src = image ? (image.getAttribute('src') || image.getAttribute('content')) : '';
+    return src ? new URL(src, baseUrl).href : '';
+}
+
+function inferSeriesFromProductUrl(url) {
+    try {
+        const segments = new URL(url, window.location.href).pathname.split('/').filter(Boolean);
+        if (segments.length < 3) return '';
+        const candidate = (segments[segments.length - 3] || '').replace(/-\d.*$/g, '');
+        if (!candidate) return '';
+        if (/^\d{4}$/.test(candidate)) return `${candidate.slice(0, 2)}:${candidate.slice(2)}`;
+        return candidate
+            .replace(/-/g, ' ')
+            .replace(/\b\w/g, char => char.toUpperCase());
+    } catch (_) {
+        return '';
+    }
+}
+
+function buildCompareMetaFromDoc(doc, url, fallback = {}) {
+    const properties = extractComparisonProperties(doc);
+    const symbols = extractComparisonSymbolLabels(doc);
+    const environmentalLabels = getComparisonPropertyValues(properties, [
+        'ympäristömerkinnät', 'ymparistomerkinnat', 'ecolabel', 'miljomarkning', 'miljomerking', 'miljomaerkning'
+    ]);
+    const allEnvironmentLabels = uniqueNonEmpty([...environmentalLabels, ...symbols.filter(label => {
+        const folded = foldCompareText(label);
+        return folded.includes('fsc') || folded.includes('mobelfakta') || folded.includes('ymparisto') || folded.includes('eco');
+    })]);
+
+    const toxicText = foldCompareText([...symbols, ...properties.map(prop => `${prop.label} ${prop.value}`)].join(' '));
+    const isToxicFree = toxicText.includes('haitta-aineeton') || toxicText.includes('toxicfree') || toxicText.includes('giftfri');
+
+    const dimensions = {
+        length: getComparisonPropertyValue(properties, ['pituus', 'length', 'langd', 'laengde']),
+        width: getComparisonPropertyValue(properties, ['leveys', 'width', 'bredde', 'bredd'], ['istuinleveys', 'seat width', 'sittebredde', 'sittbredd', 'siddebredde', 'saedebredde']),
+        height: getComparisonPropertyValue(properties, ['korkeus', 'height', 'hojde', 'hoyde'], ['istuinkorkeus', 'seat height', 'sitthojd', 'sittehoyde', 'siddehojde', 'saedehojde']),
+        depth: getComparisonPropertyValue(properties, ['syvyys', 'depth', 'djup', 'dybde'], ['istuinsyvyys', 'seat depth', 'sittedybde', 'sittdjup', 'siddedybde', 'saededybde']),
+        diameter: getComparisonPropertyValue(properties, ['halkaisija', 'diameter'])
+    };
+
+    return sanitizeCompareItem({
+        ...fallback,
+        url,
+        name: extractProductNameFromDoc(doc) || fallback.name,
+        imageUrl: extractProductImageFromDoc(doc, url) || fallback.imageUrl,
+        articleNumber: extractProductNumberFromDoc(doc) || fallback.articleNumber,
+        shortDescription: extractProductDescriptionFromDoc(doc) || fallback.shortDescription,
+        flags: uniqueNonEmpty([...symbols, ...(fallback.flags || [])]),
+        dimensions,
+        materials: getComparisonPropertyValues(properties, ['materiaali', 'material'], true),
+        environmentalLabels: allEnvironmentLabels,
+        toxicFree: isToxicFree ? 'Yes' : '',
+        series: getComparisonPropertyValue(properties, ['tuoteperhe', 'sarja', 'product series', 'produktserie', 'serie']) || inferSeriesFromProductUrl(url),
+        seatHeight: getComparisonPropertyValue(properties, ['istuinkorkeus', 'seat height', 'sitthojd', 'sittehoyde', 'siddehojde', 'saedehojde']),
+        productProperties: properties,
+        source: 'product-page',
+        loadError: '',
+        fetchedAt: Date.now()
+    });
+}
+
+function initProductComparisonUi() {
+    if (!document.body) return;
+    ensureComparisonStateLoaded().then(() => {
+        injectCompareControls();
+        renderComparePanel();
+        syncCompareButtons();
+    });
+}
+
+// --- Personal Product Notes ---
+
+function normalizeProductNoteUrl(url) {
+    if (!url) return '';
+    try {
+        const parsed = new URL(url, window.location.href);
+        const variant = parsed.searchParams.get('variant');
+        parsed.hash = '';
+        parsed.search = '';
+        if (variant) parsed.searchParams.set('variant', variant);
+        return parsed.href;
+    } catch (_) {
+        return String(url || '').trim();
+    }
+}
+
+function normalizeProductNoteKey(key) {
+    return normalizeWhitespace(key).slice(0, 180);
+}
+
+function normalizeProductNoteText(text) {
+    return String(text || '')
+        .replace(/\r\n?/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, PRODUCT_NOTE_MAX_LENGTH);
+}
+
+function normalizeProductNoteUser(user) {
+    return normalizeWhitespace(user || '').slice(0, 80) || 'Me';
+}
+
+function createProductNoteLineId(createdAt = Date.now()) {
+    return `${createdAt}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function buildProductNoteKey(meta) {
+    if (!meta) return '';
+    if (meta.articleNumber) return normalizeProductNoteKey(`article:${meta.articleNumber}`);
+    if (meta.url) return normalizeProductNoteKey(`url:${normalizeProductNoteUrl(meta.url)}`);
+    return '';
+}
+
+function getCurrentProductNoteMeta() {
+    if (isListPage()) return null;
+
+    const articleNumber = normalizeWhitespace(
+        getSelectedVariantArticleNumber() ||
+        getMainProductNumber() ||
+        getProductNumber() ||
+        ''
+    );
+    const url = normalizeProductNoteUrl(window.location.href);
+    const productName = getProductName() || '';
+    const productId = extractBaseItemNumber(articleNumber) || '';
+    const meta = {
+        articleNumber,
+        productId,
+        country: getCurrentCountryCode(),
+        productName,
+        url
+    };
+    meta.key = buildProductNoteKey(meta);
+    return meta.key ? meta : null;
+}
+
+function sanitizeProductNoteEntry(raw, fallbackKey = '') {
+    if (!raw) return null;
+
+    const source = typeof raw === 'string' ? { note: raw } : raw;
+    const key = normalizeProductNoteKey(source.key || fallbackKey);
+    if (!key) return null;
+
+    const now = Date.now();
+    const rawLines = Array.isArray(source.notes) ? source.notes : [];
+    const notes = rawLines
+        .map(line => sanitizeProductNoteLine(line))
+        .filter(Boolean);
+
+    const legacyText = normalizeProductNoteText(source.note || source.text || '');
+    if (legacyText) {
+        notes.push(sanitizeProductNoteLine({
+            id: source.id,
+            createdAt: source.createdAt || source.updatedAt,
+            user: source.user || source.author || source.username,
+            text: legacyText
+        }));
+    }
+
+    const cleanNotes = notes
+        .filter(Boolean)
+        .sort((a, b) => a.createdAt - b.createdAt);
+    if (cleanNotes.length === 0) return null;
+
+    const createdAt = Number(source.createdAt) > 0 ? Number(source.createdAt) : cleanNotes[0].createdAt || now;
+    const updatedAt = Number(source.updatedAt) > 0 ? Number(source.updatedAt) : cleanNotes[cleanNotes.length - 1].createdAt || createdAt;
+
+    return {
+        key,
+        notes: cleanNotes,
+        productId: normalizeWhitespace(source.productId || ''),
+        articleNumber: normalizeWhitespace(source.articleNumber || ''),
+        country: normalizeWhitespace(source.country || ''),
+        productName: normalizeWhitespace(source.productName || ''),
+        url: normalizeProductNoteUrl(source.url || ''),
+        createdAt,
+        updatedAt
+    };
+}
+
+function sanitizeProductNoteLine(raw) {
+    if (!raw) return null;
+    const source = typeof raw === 'string' ? { text: raw } : raw;
+    const text = normalizeProductNoteText(source.text || source.note || source.value || '');
+    if (!text) return null;
+
+    const createdAt = Number(source.createdAt || source.timestamp || source.time) > 0
+        ? Number(source.createdAt || source.timestamp || source.time)
+        : Date.now();
+
+    return {
+        id: normalizeWhitespace(source.id || '') || createProductNoteLineId(createdAt),
+        createdAt,
+        user: normalizeProductNoteUser(source.user || source.author || source.username || productNoteUserName),
+        text
+    };
+}
+
+function sanitizeProductNotesMap(rawNotes) {
+    const result = {};
+    const source = rawNotes && typeof rawNotes === 'object' ? rawNotes : {};
+
+    Object.entries(source).forEach(([key, raw]) => {
+        const entry = sanitizeProductNoteEntry(raw, key);
+        if (entry) result[entry.key] = entry;
+    });
+
+    return result;
+}
+
+function ensureProductNotesLoaded() {
+    if (productNotesLoaded) return Promise.resolve(productNotesByKey);
+    if (productNotesLoadPromise) return productNotesLoadPromise;
+
+    productNotesLoadPromise = storageLocalGet([PRODUCT_NOTES_STORAGE_KEY, PRODUCT_NOTES_USER_KEY])
+        .then(data => {
+            productNoteUserName = normalizeProductNoteUser(data && data[PRODUCT_NOTES_USER_KEY]);
+            productNotesByKey = sanitizeProductNotesMap(data && data[PRODUCT_NOTES_STORAGE_KEY]);
+            productNotesLoaded = true;
+            return productNotesByKey;
+        })
+        .catch(error => {
+            console.warn('LES: Could not load personal product notes', error);
+            productNotesByKey = {};
+            productNotesLoaded = true;
+            return productNotesByKey;
+        })
+        .finally(() => {
+            productNotesLoadPromise = null;
+        });
+
+    return productNotesLoadPromise;
+}
+
+function persistProductNotes() {
+    return storageLocalSet({ [PRODUCT_NOTES_STORAGE_KEY]: productNotesByKey }).catch(error => {
+        console.warn('LES: Could not save personal product notes', error);
+    });
+}
+
+function persistProductNoteUserName(userName) {
+    productNoteUserName = normalizeProductNoteUser(userName);
+    return storageLocalSet({ [PRODUCT_NOTES_USER_KEY]: productNoteUserName }).catch(error => {
+        console.warn('LES: Could not save product note user name', error);
+    });
+}
+
+function createNoteSvg(size = 14) {
+    const svgNS = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(svgNS, 'svg');
+    svg.setAttribute('width', String(size));
+    svg.setAttribute('height', String(size));
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('fill', 'none');
+    svg.setAttribute('stroke', 'currentColor');
+    svg.setAttribute('stroke-width', '2');
+    svg.setAttribute('stroke-linecap', 'round');
+    svg.setAttribute('stroke-linejoin', 'round');
+
+    const rect = document.createElementNS(svgNS, 'path');
+    rect.setAttribute('d', 'M5 3h12l2 2v16H5z');
+    const fold = document.createElementNS(svgNS, 'path');
+    fold.setAttribute('d', 'M17 3v4h4');
+    const line1 = document.createElementNS(svgNS, 'path');
+    line1.setAttribute('d', 'M8 11h8');
+    const line2 = document.createElementNS(svgNS, 'path');
+    line2.setAttribute('d', 'M8 15h6');
+
+    svg.appendChild(rect);
+    svg.appendChild(fold);
+    svg.appendChild(line1);
+    svg.appendChild(line2);
+    return svg;
+}
+
+function syncProductNoteButtonState() {
+    const button = document.querySelector('.les-product-note-btn');
+    if (!button) return;
+
+    const meta = button.__lesProductNoteMeta || getCurrentProductNoteMeta();
+    const entry = meta && productNotesByKey[meta.key];
+    const noteCount = entry && Array.isArray(entry.notes) ? entry.notes.length : 0;
+    const hasNote = noteCount > 0;
+    const label = button.querySelector('.les-product-note-btn-label');
+
+    button.__lesProductNoteMeta = meta;
+    button.classList.toggle('has-note', hasNote);
+    button.setAttribute('aria-pressed', hasNote ? 'true' : 'false');
+    button.title = hasNote ? `Open ${noteCount} product notes` : 'Add product note';
+    button.setAttribute('aria-label', hasNote ? `Open ${noteCount} product notes` : 'Add product note');
+    if (label) label.textContent = hasNote ? `${noteCount} note${noteCount === 1 ? '' : 's'}` : 'Note';
+}
+
+function cleanupProductNoteUi() {
+    const button = document.querySelector('.les-product-note-btn');
+    if (button) button.remove();
+
+    const panel = document.querySelector('.les-product-note-panel');
+    if (panel) panel.remove();
+
+    document.querySelectorAll('.les-has-product-note-panel').forEach(host => {
+        host.classList.remove('les-has-product-note-panel');
+    });
+
+    const buttonsBar = document.querySelector('.les-buttons-bar');
+    if (buttonsBar && buttonsBar.children.length === 0) {
+        buttonsBar.remove();
+    }
+}
+
+function formatProductNoteTimestamp(value) {
+    const time = Number(value);
+    if (!time) return '';
+    try {
+        const date = new Date(time);
+        const pad = number => String(number).padStart(2, '0');
+        return [
+            date.getFullYear(),
+            pad(date.getMonth() + 1),
+            pad(date.getDate())
+        ].join('-') + ' ' + [pad(date.getHours()), pad(date.getMinutes())].join(':');
+    } catch (_) {
+        return '';
+    }
+}
+
+function ensureProductNotePanel(meta) {
+    let panel = document.querySelector('.les-product-note-panel');
+    if (!panel) {
+        panel = document.createElement('section');
+        panel.className = 'les-product-note-panel';
+        panel.innerHTML = `
+            <div class="les-product-note-header">
+                <div>
+                    <strong>Personal notes</strong>
+                    <div class="les-product-note-product"></div>
+                </div>
+                <button type="button" class="les-product-note-close" aria-label="Close note">Close</button>
+            </div>
+            <label class="les-product-note-user-row">
+                <span>User</span>
+                <input type="text" class="les-product-note-user-input" maxlength="80" autocomplete="off" placeholder="Your name">
+            </label>
+            <div class="les-product-note-table-wrap">
+                <table class="les-product-note-table">
+                    <thead>
+                        <tr>
+                            <th class="les-product-note-select-col" title="Delete"></th>
+                            <th>Time/date</th>
+                            <th>User</th>
+                            <th>Note</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+                <div class="les-product-note-empty">No notes yet.</div>
+            </div>
+            <div class="les-product-note-compose">
+                <input type="text" class="les-product-note-input" maxlength="${PRODUCT_NOTE_MAX_LENGTH}" placeholder="Add one-line note">
+                <button type="button" class="les-product-note-save">Add note</button>
+            </div>
+            <div class="les-product-note-footer">
+                <span class="les-product-note-status"></span>
+                <div class="les-product-note-actions">
+                    <button type="button" class="les-product-note-delete">Delete selected</button>
+                </div>
+            </div>
+        `;
+
+        const buttonsBar = ensureProductActionBar();
+        if (buttonsBar && buttonsBar.parentElement) {
+            buttonsBar.parentElement.classList.add('les-has-product-note-panel');
+            buttonsBar.insertAdjacentElement('afterend', panel);
+        } else {
+            document.body.appendChild(panel);
+        }
+
+        panel.querySelector('.les-product-note-close').addEventListener('click', closeProductNotePanel);
+        const noteInput = panel.querySelector('.les-product-note-input');
+        const userInput = panel.querySelector('.les-product-note-user-input');
+        if (userInput) {
+            userInput.addEventListener('change', async () => {
+                await persistProductNoteUserName(userInput.value);
+                renderProductNotePanel(panel, panel.__lesProductNoteMeta || getCurrentProductNoteMeta());
+            });
+        }
+        if (noteInput) {
+            noteInput.addEventListener('keydown', (event) => {
+                if (event.key !== 'Enter') return;
+                event.preventDefault();
+                panel.querySelector('.les-product-note-save').click();
+            });
+        }
+        panel.querySelector('.les-product-note-save').addEventListener('click', async () => {
+            const activeMeta = panel.__lesProductNoteMeta || getCurrentProductNoteMeta();
+            if (!activeMeta) return;
+            const currentNoteInput = panel.querySelector('.les-product-note-input');
+            const currentUserInput = panel.querySelector('.les-product-note-user-input');
+            await addProductNote(activeMeta, currentNoteInput ? currentNoteInput.value : '', currentUserInput ? currentUserInput.value : '');
+            if (currentNoteInput) currentNoteInput.value = '';
+            renderProductNotePanel(panel, activeMeta);
+            if (currentNoteInput) currentNoteInput.focus();
+        });
+        panel.querySelector('.les-product-note-delete').addEventListener('click', async () => {
+            const activeMeta = panel.__lesProductNoteMeta || getCurrentProductNoteMeta();
+            if (!activeMeta) return;
+            const ids = Array.from(panel.querySelectorAll('.les-product-note-select:checked'))
+                .map(input => input.value)
+                .filter(Boolean);
+            if (ids.length === 0) {
+                showCompareToast('Select your notes to delete.');
+                return;
+            }
+            await deleteSelectedProductNotes(activeMeta, ids);
+            renderProductNotePanel(panel, activeMeta);
+        });
+    }
+
+    if (panel.parentElement && panel.parentElement !== document.body) {
+        panel.parentElement.classList.add('les-has-product-note-panel');
+    }
+    panel.__lesProductNoteMeta = meta;
+    renderProductNotePanel(panel, meta);
+    return panel;
+}
+
+function renderProductNotePanel(panel, meta) {
+    if (!panel || !meta) return;
+    const entry = productNotesByKey[meta.key] || null;
+    const notes = entry && Array.isArray(entry.notes) ? entry.notes : [];
+    const product = panel.querySelector('.les-product-note-product');
+    const status = panel.querySelector('.les-product-note-status');
+    const deleteBtn = panel.querySelector('.les-product-note-delete');
+    const table = panel.querySelector('.les-product-note-table');
+    const tbody = panel.querySelector('.les-product-note-table tbody');
+    const empty = panel.querySelector('.les-product-note-empty');
+    const userInput = panel.querySelector('.les-product-note-user-input');
+    const previousKey = panel.dataset.noteKey || '';
+    const productChanged = Boolean(previousKey && previousKey !== meta.key);
+    panel.dataset.noteKey = meta.key;
+
+    if (productChanged) {
+        const noteInput = panel.querySelector('.les-product-note-input');
+        if (noteInput) noteInput.value = '';
+    }
+    if (userInput && document.activeElement !== userInput) {
+        userInput.value = productNoteUserName;
+    }
+    if (product) product.textContent = meta.productName || meta.articleNumber || 'Current product';
+    if (status) {
+        status.textContent = notes.length > 0
+            ? `${notes.length} note${notes.length === 1 ? '' : 's'} saved`
+            : 'No notes yet';
+    }
+    if (tbody) {
+        tbody.replaceChildren();
+        const currentUser = normalizeProductNoteUser(userInput ? userInput.value : productNoteUserName);
+        notes.forEach(line => {
+            const row = document.createElement('tr');
+            const selectCell = document.createElement('td');
+            const timeCell = document.createElement('td');
+            const userCell = document.createElement('td');
+            const noteCell = document.createElement('td');
+            const canDelete = normalizeProductNoteUser(line.user) === currentUser;
+
+            selectCell.className = 'les-product-note-select-col';
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.className = 'les-product-note-select';
+            checkbox.value = line.id;
+            checkbox.disabled = !canDelete;
+            checkbox.title = canDelete ? 'Select note to delete' : 'Only notes by the current user can be deleted here';
+            selectCell.appendChild(checkbox);
+
+            timeCell.textContent = formatProductNoteTimestamp(line.createdAt);
+            userCell.textContent = line.user || '';
+            noteCell.textContent = line.text || '';
+            if (line.text) noteCell.title = line.text;
+            row.appendChild(selectCell);
+            row.appendChild(timeCell);
+            row.appendChild(userCell);
+            row.appendChild(noteCell);
+            tbody.appendChild(row);
+        });
+    }
+    if (table) table.hidden = notes.length === 0;
+    if (empty) empty.hidden = notes.length > 0;
+    if (deleteBtn) {
+        deleteBtn.disabled = !notes.some(line => normalizeProductNoteUser(line.user) === normalizeProductNoteUser(userInput ? userInput.value : productNoteUserName));
+    }
+}
+
+function openProductNotePanel(meta) {
+    if (!meta) return;
+    const panel = ensureProductNotePanel(meta);
+    panel.classList.add('is-open');
+    const noteInput = panel.querySelector('.les-product-note-input');
+    if (noteInput) noteInput.focus();
+}
+
+function closeProductNotePanel() {
+    const panel = document.querySelector('.les-product-note-panel');
+    if (panel) panel.classList.remove('is-open');
+}
+
+async function addProductNote(meta, rawText, rawUser) {
+    await ensureProductNotesLoaded();
+
+    const note = normalizeProductNoteText(rawText);
+    if (!note) {
+        showCompareToast('Write a note first.');
+        return;
+    }
+
+    const now = Date.now();
+    const existing = productNotesByKey[meta.key];
+    const user = normalizeProductNoteUser(rawUser || productNoteUserName);
+    await persistProductNoteUserName(user);
+
+    productNotesByKey[meta.key] = {
+        key: meta.key,
+        notes: [
+            ...((existing && Array.isArray(existing.notes)) ? existing.notes : []),
+            {
+                id: createProductNoteLineId(now),
+                createdAt: now,
+                user,
+                text: note
+            }
+        ],
+        productId: meta.productId || '',
+        articleNumber: meta.articleNumber || '',
+        country: meta.country || '',
+        productName: meta.productName || '',
+        url: meta.url || '',
+        createdAt: existing && existing.createdAt ? existing.createdAt : now,
+        updatedAt: now
+    };
+
+    await persistProductNotes();
+    syncProductNoteButtonState();
+    showCompareToast('Product note added.');
+}
+
+async function deleteSelectedProductNotes(meta, ids) {
+    await ensureProductNotesLoaded();
+    const idSet = new Set(Array.isArray(ids) ? ids : []);
+    if (!meta || !meta.key || !productNotesByKey[meta.key] || idSet.size === 0) return;
+
+    const entry = productNotesByKey[meta.key];
+    const remaining = Array.isArray(entry.notes)
+        ? entry.notes.filter(line => !idSet.has(line.id))
+        : [];
+
+    if (remaining.length === 0) {
+        delete productNotesByKey[meta.key];
+    } else {
+        productNotesByKey[meta.key] = {
+            ...entry,
+            notes: remaining,
+            updatedAt: Date.now()
+        };
+    }
+    await persistProductNotes();
+    syncProductNoteButtonState();
+    showCompareToast('Selected notes deleted.');
+}
+
+function createProductNoteButton(meta) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'les-product-note-btn';
+    button.__lesProductNoteMeta = meta;
+    button.setAttribute('aria-pressed', 'false');
+
+    const label = document.createElement('span');
+    label.className = 'les-product-note-btn-label';
+    button.appendChild(createNoteSvg(14));
+    button.appendChild(label);
+
+    button.addEventListener('click', async (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        await ensureProductNotesLoaded();
+        openProductNotePanel(getCurrentProductNoteMeta() || button.__lesProductNoteMeta);
+    });
+
+    return button;
+}
+
+function injectProductNoteButton() {
+    const meta = getCurrentProductNoteMeta();
+    if (!meta) {
+        cleanupProductNoteUi();
+        return;
+    }
+
+    let button = document.querySelector('.les-product-note-btn');
+    if (!button) {
+        button = createProductNoteButton(meta);
+    }
+
+    button.__lesProductNoteMeta = meta;
+    syncProductNoteButtonState();
+
+    const buttonsBar = ensureProductActionBar();
+    if (buttonsBar && button.parentElement !== buttonsBar) {
+        const compareBtn = buttonsBar.querySelector('.les-product-compare-btn');
+        if (compareBtn && compareBtn.nextSibling) {
+            buttonsBar.insertBefore(button, compareBtn.nextSibling);
+        } else if (compareBtn) {
+            buttonsBar.appendChild(button);
+        } else {
+            buttonsBar.insertBefore(button, buttonsBar.firstChild);
+        }
+    }
+
+    const panel = document.querySelector('.les-product-note-panel.is-open');
+    if (panel) {
+        panel.__lesProductNoteMeta = meta;
+        renderProductNotePanel(panel, meta);
+    }
+}
+
+function initProductNotesUi() {
+    if (!document.body || isListPage()) {
+        cleanupProductNoteUi();
+        return;
+    }
+
+    ensureProductNotesLoaded().then(injectProductNoteButton);
+}
+
+function refreshProductNotesFromStorage() {
+    productNotesLoaded = false;
+    productNotesLoadPromise = null;
+    ensureProductNotesLoaded().then(() => {
+        injectProductNoteButton();
+        const panel = document.querySelector('.les-product-note-panel.is-open');
+        if (panel) renderProductNotePanel(panel, panel.__lesProductNoteMeta || getCurrentProductNoteMeta());
+    });
+}
+
+function resolveSearchResultHref(doc, href) {
+    const rawHref = normalizeWhitespace(href);
+    if (!rawHref) return '';
+    try {
+        return new URL(rawHref, doc.__lesFetchedUrl || 'https://www.lekolar.se/').href;
+    } catch (_) {
+        return '';
+    }
+}
+
+function getSearchResultProductLink(card, doc) {
+    if (!card) return '';
+    const link = card.querySelector('a[href*="/sortiment/"], a[href*="/webbutik/"], a[href*="/verkkokauppa/"]');
+    return link ? resolveSearchResultHref(doc, link.getAttribute('href') || link.href) : '';
+}
+
+function collectSearchResultProductLinks(doc) {
+    if (!doc) return [];
+    const links = [];
+    const seen = new Set();
+    const addLink = (url) => {
+        if (!url || seen.has(url)) return;
+        seen.add(url);
+        links.push(url);
+    };
+
+    const grid = (typeof findProductGridInDoc === 'function') ? findProductGridInDoc(doc) : null;
+    if (grid) {
+        Array.from(grid.children).forEach(card => addLink(getSearchResultProductLink(card, doc)));
+    }
+
+    if (links.length === 0) {
+        const cards = doc.querySelectorAll('.product-item, .category-product, .product-list-item, article, .swiper-slide');
+        cards.forEach(card => addLink(getSearchResultProductLink(card, doc)));
+    }
+
+    if (links.length === 0) {
+        const mainContent = doc.querySelector('main') || doc.body || doc;
+        mainContent.querySelectorAll('a[href*="/sortiment/"], a[href*="/webbutik/"], a[href*="/verkkokauppa/"]')
+            .forEach(link => addLink(resolveSearchResultHref(doc, link.getAttribute('href') || link.href)));
+    }
+
+    return links;
 }
 
 function findSearchResultProductUrl(doc, identifiers = []) {
     if (!doc) return null;
+    const productLinks = collectSearchResultProductLinks(doc);
+    if (productLinks.length > 0) {
+        return productLinks[0];
+    }
+
     const cleanedIds = identifiers.map(normalizeWhitespace).filter(Boolean);
     if (cleanedIds.length === 0) return null;
 
@@ -1261,8 +4413,8 @@ function findSearchResultProductUrl(doc, identifiers = []) {
             const hit = doc.querySelector(selector);
             if (!hit) continue;
             const card = hit.closest('.product-item, .category-product, .product-list-item, article, li, .swiper-slide');
-            const link = card ? card.querySelector('a[href*="/sortiment/"], a[href*="/verkkokauppa/"]') : null;
-            if (link && link.href) return link.href;
+            const url = getSearchResultProductLink(card, doc);
+            if (url) return url;
         }
     }
 
@@ -1271,17 +4423,8 @@ function findSearchResultProductUrl(doc, identifiers = []) {
         const text = normalizeWhitespace(card.textContent);
         if (!text) continue;
         if (!cleanedIds.some(id => text.includes(id))) continue;
-        const link = card.querySelector('a[href*="/sortiment/"], a[href*="/verkkokauppa/"]');
-        if (link && link.href) return link.href;
-    }
-
-    const candidateLinks = Array.from(doc.querySelectorAll('a[href*="/sortiment/"]'))
-        .map(link => link.href)
-        .filter(Boolean)
-        .filter((href, index, list) => list.indexOf(href) === index);
-
-    if (candidateLinks.length === 1) {
-        return candidateLinks[0];
+        const url = getSearchResultProductLink(card, doc);
+        if (url) return url;
     }
 
     return null;
@@ -1308,32 +4451,49 @@ async function resolveSwedishReference(productNumber) {
     const productCode = getMainProductCode();
     const productName = normalizeWhitespace(getProductName());
     const searchBaseUrl = 'https://www.lekolar.se/sok/';
-    const queries = [normalizedNumber, productCode, productName].filter(Boolean);
+    const queries = [normalizedNumber, productCode, productName]
+        .filter(Boolean)
+        .filter((query, index, list) => list.indexOf(query) === index);
     const identifiers = [normalizedNumber, productCode].filter(Boolean);
 
-    let productUrl = '';
+    const lookupErrors = [];
     for (const query of queries) {
         const searchUrl = (typeof buildLekolarSearchUrl === 'function')
             ? buildLekolarSearchUrl(searchBaseUrl, query, {})
             : `${searchBaseUrl}?query=${encodeURIComponent(query)}`;
-        const searchDoc = await fetchHtmlDocument(searchUrl);
+
+        let searchDoc = null;
+        try {
+            searchDoc = await fetchHtmlDocument(searchUrl);
+        } catch (error) {
+            lookupErrors.push(error);
+            continue;
+        }
+
+        let productUrl = '';
         const fetchedUrl = normalizeWhitespace(searchDoc.__lesFetchedUrl || '');
         if (fetchedUrl.includes('/sortiment/')) {
             productUrl = fetchedUrl;
         } else {
             productUrl = findSearchResultProductUrl(searchDoc, identifiers);
         }
-        if (productUrl) break;
+        if (!productUrl) continue;
+
+        try {
+            const productDoc = await fetchHtmlDocument(productUrl);
+            const result = extractSwedishProductData(productDoc, productUrl);
+            if (!result.description) throw new Error('Swedish description was empty');
+
+            swedishReferenceCache.set(normalizedNumber, result);
+            return result;
+        } catch (error) {
+            lookupErrors.push(error);
+        }
     }
 
-    if (!productUrl) throw new Error('Could not find Swedish product page');
-
-    const productDoc = await fetchHtmlDocument(productUrl);
-    const result = extractSwedishProductData(productDoc, productUrl);
-    if (!result.description) throw new Error('Swedish description was empty');
-
-    swedishReferenceCache.set(normalizedNumber, result);
-    return result;
+    const blockingError = lookupErrors.find(error => !isMissingRemotePageError(error));
+    if (blockingError) throw blockingError;
+    throw new Error('Could not find Swedish product page');
 }
 
 function renderSwedishReferencePanel(panel, data) {
@@ -1389,6 +4549,10 @@ function renderSwedishReferencePanel(panel, data) {
         translateButton.dataset.originalText = data.description || '';
         translateButton.textContent = `Translate in place (${targetLabel})`;
 
+        lesHasExternalServicesConsentFromStorage().then(hasConsent => {
+            lesApplyConsentStateToTranslateButton(translateButton, hasConsent);
+        });
+
         const link = document.createElement('a');
         link.href = data.url || '#';
         link.target = '_blank';
@@ -1433,7 +4597,7 @@ function renderSwedishReferencePanel(panel, data) {
                     translateBtn.textContent = 'Show Swedish original';
                 } catch (error) {
                     translateBtn.textContent = oldLabel;
-                    status.textContent = `Translation failed: ${(error && error.message) ? error.message : 'unknown_error'}`;
+                    status.textContent = `Translation failed: ${formatExternalServiceError(error)}`;
                 } finally {
                     translateBtn.disabled = false;
                 }
@@ -1468,7 +4632,7 @@ async function showSwedishReference(productNumber, button) {
         const data = await resolveSwedishReference(productNumber);
         renderSwedishReferencePanel(panel, data);
     } catch (error) {
-        renderSwedishReferenceError(panel, (error && error.message) ? error.message : 'Could not load Swedish reference.');
+        renderSwedishReferenceError(panel, formatSwedishReferenceError(error));
     } finally {
         updateSwedishReferenceButtonState(button, 'idle');
     }
@@ -1477,6 +4641,314 @@ async function showSwedishReference(productNumber, button) {
 function applyEnvironmentalLogoVisibility() {
     const shouldHide = Boolean(currentSettings.hideEnvironmentalLogo) && isListPage();
     document.documentElement.classList.toggle('les-hide-environmental-logo', shouldHide);
+}
+
+function clampProductLayoutNumber(value, min, max) {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return min;
+    return Math.min(Math.max(number, min), max);
+}
+
+function sanitizeProductLayoutPreference(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    const ratio = Number(raw.detailsRatio);
+    if (!Number.isFinite(ratio)) return null;
+    return {
+        detailsRatio: clampProductLayoutNumber(ratio, 0.18, 0.55)
+    };
+}
+
+function ensureProductLayoutPreferenceLoaded() {
+    if (productLayoutPreferenceLoaded) return Promise.resolve(productLayoutPreference);
+    if (productLayoutPreferenceLoadPromise) return productLayoutPreferenceLoadPromise;
+
+    productLayoutPreferenceLoadPromise = storageLocalGet(PRODUCT_LAYOUT_STORAGE_KEY)
+        .then(data => {
+            productLayoutPreference = sanitizeProductLayoutPreference(data && data[PRODUCT_LAYOUT_STORAGE_KEY]);
+            productLayoutPreferenceLoaded = true;
+            return productLayoutPreference;
+        })
+        .catch(error => {
+            console.warn('LES: Could not load product column layout', error);
+            productLayoutPreference = null;
+            productLayoutPreferenceLoaded = true;
+            return productLayoutPreference;
+        })
+        .finally(() => {
+            productLayoutPreferenceLoadPromise = null;
+        });
+
+    return productLayoutPreferenceLoadPromise;
+}
+
+function persistProductLayoutPreference(detailsWidth, contentWidth) {
+    const ratio = contentWidth > 0 ? detailsWidth / contentWidth : 0;
+    productLayoutPreference = {
+        detailsRatio: clampProductLayoutNumber(ratio, 0.18, 0.55)
+    };
+    productLayoutPreferenceLoaded = true;
+    syncProductLayoutResetButton();
+
+    return storageLocalSet({ [PRODUCT_LAYOUT_STORAGE_KEY]: productLayoutPreference }).catch(error => {
+        console.warn('LES: Could not save product column layout', error);
+    });
+}
+
+function resetProductLayoutPreference() {
+    productLayoutPreference = null;
+    productLayoutPreferenceLoaded = true;
+    syncProductLayoutResetButton();
+
+    return storageLocalRemove(PRODUCT_LAYOUT_STORAGE_KEY).catch(error => {
+        console.warn('LES: Could not reset product column layout', error);
+    });
+}
+
+function getProductLayoutElements() {
+    const content = document.querySelector('.product-page-wrapper .product-content, .jsProductPage .product-content');
+    if (!content) return null;
+
+    const children = Array.from(content.children || []);
+    const images = children.find(el => el.classList && el.classList.contains('product-images'));
+    const info = children.find(el =>
+        el.classList &&
+        el.classList.contains('product-info') &&
+        (el.classList.contains('js-productInfo') || el.querySelector('h1'))
+    );
+    const details = children.find(el => el.classList && el.classList.contains('product-details'));
+
+    if (!images || !info || !details) return null;
+    return { content, images, info, details };
+}
+
+function measureProductLayout(elements) {
+    const contentRect = elements.content.getBoundingClientRect();
+    const contentWidth = contentRect.width;
+    if (!contentWidth || contentWidth < 920) return null;
+
+    const measuredImagesWidth = Math.round(elements.images.getBoundingClientRect().width || contentWidth * 0.34);
+    const measuredDetailsWidth = Math.round(elements.details.getBoundingClientRect().width || contentWidth * 0.25);
+    const maxImagesWidth = Math.max(260, Math.round(contentWidth * 0.45));
+    const imagesWidth = Math.round(clampProductLayoutNumber(measuredImagesWidth, 260, maxImagesWidth));
+    const maxDetailsWidth = Math.round(contentWidth - imagesWidth - PRODUCT_LAYOUT_MIN_INFO_WIDTH - PRODUCT_LAYOUT_HANDLE_WIDTH);
+
+    if (maxDetailsWidth < PRODUCT_LAYOUT_MIN_DETAILS_WIDTH + 20) return null;
+
+    return {
+        contentWidth,
+        imagesWidth,
+        defaultDetailsWidth: Math.round(clampProductLayoutNumber(
+            measuredDetailsWidth,
+            PRODUCT_LAYOUT_MIN_DETAILS_WIDTH,
+            maxDetailsWidth
+        )),
+        maxDetailsWidth
+    };
+}
+
+function getProductLayoutState(content) {
+    return content && content.__lesProductLayoutState ? content.__lesProductLayoutState : null;
+}
+
+function getProductLayoutWidthBounds(content) {
+    const state = getProductLayoutState(content);
+    const contentWidth = content.getBoundingClientRect().width;
+    const imagesWidth = state && state.imagesWidth ? state.imagesWidth : Math.round(contentWidth * 0.34);
+    const maxDetailsWidth = Math.round(contentWidth - imagesWidth - PRODUCT_LAYOUT_MIN_INFO_WIDTH - PRODUCT_LAYOUT_HANDLE_WIDTH);
+
+    return {
+        contentWidth,
+        min: PRODUCT_LAYOUT_MIN_DETAILS_WIDTH,
+        max: Math.max(PRODUCT_LAYOUT_MIN_DETAILS_WIDTH, maxDetailsWidth)
+    };
+}
+
+function applyProductLayoutDetailsWidth(content, width) {
+    const bounds = getProductLayoutWidthBounds(content);
+    const detailsWidth = Math.round(clampProductLayoutNumber(width, bounds.min, bounds.max));
+    content.style.setProperty('--les-product-details-width', `${detailsWidth}px`);
+
+    const state = getProductLayoutState(content);
+    if (state) state.detailsWidth = detailsWidth;
+
+    return detailsWidth;
+}
+
+function createProductLayoutResetIcon() {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('aria-hidden', 'true');
+    svg.setAttribute('focusable', 'false');
+
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', 'M7 7h6a5 5 0 1 1-4.3 7.6');
+    path.setAttribute('fill', 'none');
+    path.setAttribute('stroke', 'currentColor');
+    path.setAttribute('stroke-width', '2');
+    path.setAttribute('stroke-linecap', 'round');
+    path.setAttribute('stroke-linejoin', 'round');
+
+    const arrow = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    arrow.setAttribute('d', 'M7 7v5H2');
+    arrow.setAttribute('fill', 'none');
+    arrow.setAttribute('stroke', 'currentColor');
+    arrow.setAttribute('stroke-width', '2');
+    arrow.setAttribute('stroke-linecap', 'round');
+    arrow.setAttribute('stroke-linejoin', 'round');
+
+    svg.appendChild(path);
+    svg.appendChild(arrow);
+    return svg;
+}
+
+function syncProductLayoutResetButton(root) {
+    const scope = root || document;
+    const buttons = scope.querySelectorAll ? scope.querySelectorAll('.les-product-divider-reset') : [];
+    const hasCustomLayout = !!productLayoutPreference;
+    buttons.forEach(button => {
+        button.disabled = !hasCustomLayout;
+        button.classList.toggle('is-active', hasCustomLayout);
+        button.title = hasCustomLayout ? 'Reset product columns to default' : 'Product columns are at default';
+    });
+}
+
+function createProductLayoutDivider(content) {
+    const divider = document.createElement('div');
+    divider.className = 'les-product-divider';
+    divider.setAttribute('role', 'separator');
+    divider.setAttribute('aria-orientation', 'vertical');
+    divider.title = 'Drag to resize product details';
+
+    const resetButton = document.createElement('button');
+    resetButton.type = 'button';
+    resetButton.className = 'les-product-divider-reset';
+    resetButton.setAttribute('aria-label', 'Reset product columns to default');
+    resetButton.appendChild(createProductLayoutResetIcon());
+    divider.appendChild(resetButton);
+
+    divider.addEventListener('pointerdown', event => {
+        if (event.button !== undefined && event.button !== 0) return;
+        if (event.target && event.target.closest && event.target.closest('.les-product-divider-reset')) return;
+
+        event.preventDefault();
+        const state = getProductLayoutState(content);
+        if (!state) return;
+
+        divider.classList.add('is-dragging');
+        document.documentElement.classList.add('les-product-divider-dragging');
+
+        const move = moveEvent => {
+            const bounds = getProductLayoutWidthBounds(content);
+            const proposedWidth = bounds.contentWidth - (moveEvent.clientX - content.getBoundingClientRect().left) - (PRODUCT_LAYOUT_HANDLE_WIDTH / 2);
+            const detailsWidth = applyProductLayoutDetailsWidth(content, proposedWidth);
+            divider.setAttribute('aria-valuenow', String(detailsWidth));
+        };
+
+        const finish = finishEvent => {
+            document.removeEventListener('pointermove', move);
+            document.removeEventListener('pointerup', finish);
+            document.removeEventListener('pointercancel', finish);
+            divider.classList.remove('is-dragging');
+            document.documentElement.classList.remove('les-product-divider-dragging');
+
+            const currentState = getProductLayoutState(content);
+            const bounds = getProductLayoutWidthBounds(content);
+            if (currentState && bounds.contentWidth > 0) {
+                persistProductLayoutPreference(currentState.detailsWidth, bounds.contentWidth);
+            }
+
+            if (finishEvent) finishEvent.preventDefault();
+        };
+
+        move(event);
+        document.addEventListener('pointermove', move);
+        document.addEventListener('pointerup', finish);
+        document.addEventListener('pointercancel', finish);
+    });
+
+    resetButton.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopPropagation();
+
+        const state = getProductLayoutState(content);
+        if (!state) return;
+
+        const detailsWidth = applyProductLayoutDetailsWidth(content, state.defaultDetailsWidth);
+        divider.setAttribute('aria-valuenow', String(detailsWidth));
+        resetProductLayoutPreference();
+    });
+
+    return divider;
+}
+
+function cleanupProductLayoutResizer() {
+    document.querySelectorAll('.les-product-divider').forEach(el => el.remove());
+    document.querySelectorAll('.product-content.les-resizable-product-content').forEach(content => {
+        content.classList.remove('les-resizable-product-content');
+        content.style.removeProperty('--les-product-images-width');
+        content.style.removeProperty('--les-product-details-width');
+        content.__lesProductLayoutState = null;
+    });
+    document.documentElement.classList.remove('les-product-divider-dragging');
+}
+
+function setupProductLayoutResizer(elements, preference) {
+    if (!elements || !elements.content || !elements.content.isConnected) return;
+
+    const content = elements.content;
+    let state = getProductLayoutState(content);
+
+    if (!state) {
+        const measurements = measureProductLayout(elements);
+        if (!measurements) {
+            cleanupProductLayoutResizer();
+            return;
+        }
+
+        state = {
+            imagesWidth: measurements.imagesWidth,
+            defaultDetailsWidth: measurements.defaultDetailsWidth,
+            detailsWidth: measurements.defaultDetailsWidth
+        };
+        content.__lesProductLayoutState = state;
+        content.style.setProperty('--les-product-images-width', `${measurements.imagesWidth}px`);
+    }
+
+    let divider = content.querySelector(':scope > .les-product-divider');
+    if (!divider) {
+        divider = createProductLayoutDivider(content);
+        content.insertBefore(divider, elements.details);
+    }
+
+    content.classList.add('les-resizable-product-content');
+
+    const bounds = getProductLayoutWidthBounds(content);
+    const preferredWidth = preference && preference.detailsRatio
+        ? bounds.contentWidth * preference.detailsRatio
+        : state.defaultDetailsWidth;
+    const detailsWidth = applyProductLayoutDetailsWidth(content, preferredWidth);
+
+    divider.setAttribute('aria-valuemin', String(PRODUCT_LAYOUT_MIN_DETAILS_WIDTH));
+    divider.setAttribute('aria-valuemax', String(bounds.max));
+    divider.setAttribute('aria-valuenow', String(detailsWidth));
+    syncProductLayoutResetButton(content);
+}
+
+function initProductLayoutResizer() {
+    if (!document.body || isListPage() || window.innerWidth < 900 || currentSettings.productLayoutDivider === false) {
+        cleanupProductLayoutResizer();
+        return;
+    }
+
+    const elements = getProductLayoutElements();
+    if (!elements) {
+        cleanupProductLayoutResizer();
+        return;
+    }
+
+    ensureProductLayoutPreferenceLoaded().then(preference => {
+        setupProductLayoutResizer(elements, preference);
+    });
 }
 
 function findAndInject() {
@@ -1565,6 +5037,9 @@ function findAndInject() {
         ensureProductImageActionButton();
     }
 
+    // 2c. Product-page one-click product card export
+    ensureProductCardPptButton();
+
     // 3. Inject Swedish reference button (product pages only)
     if (!isListPage()) {
         const mainProductNumber = getMainProductNumber();
@@ -1577,6 +5052,7 @@ function findAndInject() {
                 btn.type = 'button';
                 btn.className = 'les-sv-reference-btn';
                 btn.title = 'Show Swedish source text for this product';
+                btn.setAttribute('aria-label', 'Show Swedish source text for this product');
 
                 const svgNS = 'http://www.w3.org/2000/svg';
                 const svg = document.createElementNS(svgNS, 'svg');
@@ -1640,10 +5116,8 @@ function findAndInject() {
         cleanupSwedishReferenceUi();
     }
 
-    const restrictedEnabled = canUseRestrictedFeatures();
-
     // 4. Inject Compliance Lookup Button (product pages only)
-    if (restrictedEnabled && !isListPage()) {
+    if (!isListPage()) {
         const mainProductNumber = getMainProductNumber();
         const baseNumber = extractBaseItemNumber(mainProductNumber);
         if (baseNumber) {
@@ -1690,6 +5164,7 @@ function findAndInject() {
                 svg.appendChild(chk2);
 
                 const label = document.createElement('span');
+                label.className = 'lekolar-compliance-label';
                 label.textContent = 'Search in SharePoint';
 
                 btn.appendChild(svg);
@@ -1699,12 +5174,16 @@ function findAndInject() {
             // Always refresh URL/title in case of SPA navigation between product pages.
             btn.href = complianceUrl;
             btn.title = `Search ${baseNumber} in SharePoint`;
+            btn.setAttribute('aria-label', `Search ${baseNumber} in SharePoint`);
 
-            // Keep placement at bottom of the Tuotetiedot / product-properties sidebar.
-            const sidebar = document.querySelector('.product-properties, .product-attributes, .product-details-sidebar, .product-specs');
-            if (sidebar && btn.parentElement !== sidebar) {
-                sidebar.appendChild(btn);
-            } else if (!sidebar) {
+            const buttonsBar = ensureProductActionBar();
+            if (buttonsBar && btn.parentElement !== buttonsBar) {
+                buttonsBar.appendChild(btn);
+            } else if (!buttonsBar) {
+                const sidebar = document.querySelector('.product-properties, .product-attributes, .product-details-sidebar, .product-specs');
+                if (sidebar && btn.parentElement !== sidebar) {
+                    sidebar.appendChild(btn);
+                }
                 const specsList = document.querySelector('.product-properties ul, .product-attributes ul');
                 if (specsList && btn.parentElement !== specsList.parentElement) {
                     specsList.parentElement.appendChild(btn);
@@ -1720,12 +5199,7 @@ function findAndInject() {
     }
 
     // 5. Inject Spec Search (checkboxes + links on spec rows)
-    if (restrictedEnabled) {
-        injectSpecSearch();
-    } else {
-        const staleSpecBtn = document.querySelector('.les-spec-search-btn');
-        if (staleSpecBtn) staleSpecBtn.remove();
-    }
+    injectSpecSearch();
 }
 
 // --- Spec Search: make product attributes into searchable links ---
@@ -1782,6 +5256,45 @@ function matchSpecKey(labelText) {
         }
     }
     return null;
+}
+
+function appendDimensionSpecLinks(valEl, fullText, spec, labelText, baseUrl) {
+    if (typeof buildSpecSearchUrl !== 'function') return false;
+
+    const dimensionPattern = /(\d+(?:[.,]\d+)?)(?:\s*(cm|mm|m))?/gi;
+    const matches = Array.from(fullText.matchAll(dimensionPattern));
+    if (matches.length === 0) return false;
+
+    valEl.textContent = '';
+
+    let cursor = 0;
+    matches.forEach(match => {
+        const rawValue = match[1];
+        const searchValue = rawValue.replace(',', '.');
+        const displayValue = match[0];
+        const start = match.index || 0;
+
+        if (start > cursor) {
+            valEl.appendChild(document.createTextNode(fullText.substring(cursor, start)));
+        }
+
+        const link = document.createElement('a');
+        link.className = 'les-spec-link';
+        link.href = buildSpecSearchUrl(baseUrl, '', { [spec.filterKey]: searchValue });
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        link.title = `Search: ${labelText} ${displayValue}`;
+        link.textContent = displayValue;
+        valEl.appendChild(link);
+
+        cursor = start + displayValue.length;
+    });
+
+    if (cursor < fullText.length) {
+        valEl.appendChild(document.createTextNode(fullText.substring(cursor)));
+    }
+
+    return true;
 }
 
 function injectSpecSearch() {
@@ -1847,21 +5360,7 @@ function injectSpecSearch() {
 
         if (spec.type === 'dimension') {
             if (hasBuildUrl) {
-                const numericPart = fullText.match(/(\d+(?:[.,]\d+)?)\s*(cm|mm|m)?/);
-                if (numericPart) {
-                    const link = document.createElement('a');
-                    link.className = 'les-spec-link';
-                    link.href = buildSpecSearchUrl(baseUrl, '', { [spec.filterKey]: searchValue });
-                    link.target = '_blank';
-                    link.rel = 'noopener noreferrer';
-                    link.title = `Search: ${th.innerText.replace(':', '').trim()} ${numericPart[0]}`;
-                    link.textContent = numericPart[0];
-
-                    const rest = fullText.substring(numericPart.index + numericPart[0].length);
-                    valEl.textContent = fullText.substring(0, numericPart.index);
-                    valEl.appendChild(link);
-                    if (rest) valEl.appendChild(document.createTextNode(rest));
-                }
+                appendDimensionSpecLinks(valEl, fullText, spec, th.innerText.replace(':', '').trim(), baseUrl);
             }
 
             const checkbox = document.createElement('input');
@@ -1911,6 +5410,7 @@ function injectSpecSearch() {
         const btn = document.createElement('button');
         btn.className = 'les-spec-search-btn';
         btn.title = 'Search by selected dimensions';
+        btn.setAttribute('aria-label', 'Search by selected dimensions');
 
         const svgNS = 'http://www.w3.org/2000/svg';
         const svg = document.createElementNS(svgNS, 'svg');
@@ -1935,7 +5435,8 @@ function injectSpecSearch() {
         svg.appendChild(line);
 
         const label = document.createElement('span');
-        label.textContent = ' Search';
+        label.className = 'les-spec-search-label';
+        label.textContent = 'Search';
 
         btn.appendChild(svg);
         btn.appendChild(label);
@@ -2089,6 +5590,283 @@ function parseNordicPrice(text) {
     return null;
 }
 
+const PRICE_ADJUSTMENT_SELECTOR = [
+    '.product-price',
+    '.price-info',
+    '.sales-price',
+    '.campaign-price',
+    '.current-price',
+    '.regular-price',
+    '.list-price',
+    '.price',
+    '.amount'
+].join(', ');
+
+function normalizePriceAdjustmentPercent(value) {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return 0;
+    return Math.min(Math.max(number, -100), 500);
+}
+
+function normalizePriceAdjustmentColor(value) {
+    const color = String(value || '').trim();
+    return /^#[0-9a-f]{6}$/i.test(color) ? color : '#fff3bf';
+}
+
+function getPriceAdjustmentConfig() {
+    return {
+        active: Boolean(currentSettings && currentSettings.priceAdjustmentEnabled),
+        percent: normalizePriceAdjustmentPercent(currentSettings && currentSettings.priceAdjustmentPercent),
+        color: normalizePriceAdjustmentColor(currentSettings && currentSettings.priceAdjustmentHighlightColor)
+    };
+}
+
+function formatPriceAdjustmentPercent(percent) {
+    const rounded = Math.round(percent * 10) / 10;
+    const text = Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
+    return `${rounded > 0 ? '+' : ''}${text}%`;
+}
+
+function findNordicPriceMatch(text) {
+    const pattern = /((?:€|kr|SEK|NOK|DKK|EUR)\s*)(\d[\d\s\u00a0.]*[,.]?\d{0,2})|(\d[\d\s\u00a0.]*[,.]?\d{0,2})(\s*(?:€|kr|SEK|NOK|DKK|EUR))/i;
+    const match = pattern.exec(text || '');
+    if (!match) return null;
+
+    const rawNumber = match[2] || match[3] || '';
+    const price = parseNordicPrice(rawNumber);
+    if (price === null) return null;
+
+    return {
+        index: match.index,
+        full: match[0],
+        rawNumber,
+        price
+    };
+}
+
+function getPriceNumberFormat(rawNumber) {
+    const cleaned = String(rawNumber || '').replace(/\u00a0/g, ' ');
+    const decimalMatch = cleaned.match(/([,.])(\d{1,2})\s*$/);
+    const decimalSeparator = decimalMatch ? decimalMatch[1] : ',';
+    const decimals = decimalMatch ? decimalMatch[2].length : 0;
+    const integerPart = decimalMatch ? cleaned.slice(0, decimalMatch.index) : cleaned;
+
+    let thousandsSeparator = '';
+    if (/\d\s+\d{3}/.test(integerPart)) {
+        thousandsSeparator = ' ';
+    } else if (/\d\.\d{3}/.test(integerPart) && decimalSeparator === ',') {
+        thousandsSeparator = '.';
+    } else if (/\d,\d{3}/.test(integerPart) && decimalSeparator === '.') {
+        thousandsSeparator = ',';
+    }
+
+    return { decimals, decimalSeparator, thousandsSeparator };
+}
+
+function groupPriceInteger(integerText, separator) {
+    if (!separator) return integerText;
+    const sign = integerText.startsWith('-') ? '-' : '';
+    const digits = sign ? integerText.slice(1) : integerText;
+    return sign + digits.replace(/\B(?=(\d{3})+(?!\d))/g, separator);
+}
+
+function formatAdjustedPriceNumber(value, rawNumber) {
+    const format = getPriceNumberFormat(rawNumber);
+    const fixed = Math.max(0, value).toFixed(format.decimals);
+    const parts = fixed.split('.');
+    const integerPart = groupPriceInteger(parts[0], format.thousandsSeparator);
+    if (format.decimals === 0) return integerPart;
+    return `${integerPart}${format.decimalSeparator}${parts[1]}`;
+}
+
+function buildAdjustedPriceText(originalText, percent) {
+    const match = findNordicPriceMatch(originalText);
+    if (!match) return null;
+
+    const adjustedPrice = match.price * (1 + percent / 100);
+    const adjustedNumber = formatAdjustedPriceNumber(adjustedPrice, match.rawNumber);
+    const adjustedFull = match.full.replace(match.rawNumber, adjustedNumber);
+
+    return {
+        text: originalText.slice(0, match.index) + adjustedFull + originalText.slice(match.index + match.full.length),
+        originalPrice: match.price,
+        adjustedPrice
+    };
+}
+
+function getTextNodes(root) {
+    const nodes = [];
+    if (!root) return nodes;
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+        acceptNode(node) {
+            return node.nodeValue && /\d/.test(node.nodeValue)
+                ? NodeFilter.FILTER_ACCEPT
+                : NodeFilter.FILTER_REJECT;
+        }
+    });
+    let node = walker.nextNode();
+    while (node) {
+        nodes.push(node);
+        node = walker.nextNode();
+    }
+    return nodes;
+}
+
+function pricesAreClose(a, b) {
+    return Math.abs(Number(a) - Number(b)) < 0.005;
+}
+
+function writeAdjustedPriceText(element, originalText, adjustedText, percent) {
+    const originalMatch = findNordicPriceMatch(originalText);
+    const adjustedMatch = findNordicPriceMatch(adjustedText);
+    if (!originalMatch || !adjustedMatch) return false;
+
+    for (const node of getTextNodes(element)) {
+        const adjustedNode = buildAdjustedPriceText(node.nodeValue, percent);
+        if (adjustedNode) {
+            node.nodeValue = adjustedNode.text;
+            return true;
+        }
+    }
+
+    const originalNumberKey = originalMatch.rawNumber.replace(/[\s\u00a0]/g, '');
+    const numberPattern = /\d[\d\s\u00a0.]*[,.]?\d{0,2}/g;
+    for (const node of getTextNodes(element)) {
+        const text = node.nodeValue;
+        const replaced = text.replace(numberPattern, (token) => {
+            const tokenKey = token.replace(/[\s\u00a0]/g, '');
+            const tokenPrice = parseNordicPrice(token);
+            if (tokenKey === originalNumberKey || (tokenPrice !== null && pricesAreClose(tokenPrice, originalMatch.price))) {
+                return adjustedMatch.rawNumber;
+            }
+            return token;
+        });
+        if (replaced !== text) {
+            node.nodeValue = replaced;
+            return true;
+        }
+    }
+
+    return false;
+}
+
+function isPriceAdjustmentCandidate(element) {
+    if (!element || element.nodeType !== 1) return false;
+    if (element.closest('.lekolar-sort-container, .les-card-actions, .les-buttons-bar')) return false;
+    if (element.closest('button, input, select, textarea')) return false;
+    if (element.matches('.price-buy-info, .buy-info, .js-buyInfo')) return false;
+
+    const text = (element.dataset.lesOriginalPriceText || element.textContent || '').trim();
+    if (!text || !/\d/.test(text) || !/(€|kr|SEK|NOK|DKK|EUR)/i.test(text)) return false;
+    return Boolean(findNordicPriceMatch(text));
+}
+
+function restorePriceAdjustmentElement(element) {
+    if (!element || element.nodeType !== 1) return;
+    if (element.dataset.lesOriginalPriceHtml !== undefined) {
+        element.innerHTML = element.dataset.lesOriginalPriceHtml;
+    }
+    element.classList.remove('les-price-adjusted');
+    element.style.removeProperty('--les-price-adjustment-color');
+    delete element.dataset.lesOriginalPriceText;
+    delete element.dataset.lesOriginalPriceHtml;
+    delete element.dataset.lesPriceAdjustmentLabel;
+    delete element.dataset.lesPriceAdjustmentPercent;
+    delete element.dataset.lesPriceAdjustmentColor;
+    delete element.dataset.lesPriceAdjusted;
+    if (element.dataset.lesOriginalPriceTitle !== undefined) {
+        if (element.dataset.lesOriginalPriceTitle) {
+            element.setAttribute('title', element.dataset.lesOriginalPriceTitle);
+        } else {
+            element.removeAttribute('title');
+        }
+    } else {
+        element.removeAttribute('title');
+    }
+    delete element.dataset.lesOriginalPriceTitle;
+}
+
+function restorePriceAdjustments(root) {
+    const scope = root && root.querySelectorAll ? root : document;
+    const elements = [];
+    if (scope.matches && scope.matches('.les-price-adjusted')) elements.push(scope);
+    if (scope.querySelectorAll) elements.push(...Array.from(scope.querySelectorAll('.les-price-adjusted')));
+    elements.forEach(restorePriceAdjustmentElement);
+    syncPriceAdjustmentBanner({ active: false });
+}
+
+function syncPriceAdjustmentBanner(config) {
+    const active = config && config.active;
+    document.documentElement.classList.toggle('les-price-adjustment-active', Boolean(active));
+    if (active) {
+        if (document.documentElement.style.getPropertyValue('--les-price-adjustment-color') !== config.color) {
+            document.documentElement.style.setProperty('--les-price-adjustment-color', config.color);
+        }
+    } else {
+        document.documentElement.style.removeProperty('--les-price-adjustment-color');
+    }
+
+    document.querySelectorAll('.les-price-simulation-banner').forEach(banner => banner.remove());
+}
+
+function applyPriceAdjustmentToElement(element, config) {
+    if (!isPriceAdjustmentCandidate(element)) return;
+
+    const percentKey = String(config.percent);
+    if (
+        element.dataset.lesPriceAdjusted === 'true' &&
+        element.dataset.lesPriceAdjustmentPercent === percentKey &&
+        element.dataset.lesPriceAdjustmentColor === config.color
+    ) {
+        return;
+    }
+
+    if (element.dataset.lesOriginalPriceText === undefined) {
+        element.dataset.lesOriginalPriceText = element.textContent || '';
+        element.dataset.lesOriginalPriceHtml = element.innerHTML || '';
+        element.dataset.lesOriginalPriceTitle = element.getAttribute('title') || '';
+    }
+
+    const originalText = element.dataset.lesOriginalPriceText;
+    const adjusted = buildAdjustedPriceText(originalText, config.percent);
+    if (!adjusted) return;
+
+    if (element.dataset.lesOriginalPriceHtml !== undefined) {
+        element.innerHTML = element.dataset.lesOriginalPriceHtml;
+    }
+    if (!writeAdjustedPriceText(element, originalText, adjusted.text, config.percent)) return;
+
+    element.classList.add('les-price-adjusted');
+    element.style.setProperty('--les-price-adjustment-color', config.color);
+    element.dataset.lesPriceAdjusted = 'true';
+    element.dataset.lesPriceAdjustmentLabel = `sim ${formatPriceAdjustmentPercent(config.percent)}`;
+    element.dataset.lesPriceAdjustmentPercent = percentKey;
+    element.dataset.lesPriceAdjustmentColor = config.color;
+    element.title = `Simulated price. Original: ${originalText.trim()}`;
+}
+
+function collectPriceAdjustmentCandidates(root) {
+    const scope = root && root.querySelectorAll ? root : document;
+    const elements = [];
+    if (scope.matches && scope.matches(PRICE_ADJUSTMENT_SELECTOR)) elements.push(scope);
+    if (scope.querySelectorAll) elements.push(...Array.from(scope.querySelectorAll(PRICE_ADJUSTMENT_SELECTOR)));
+    return elements.filter((element, index, list) => {
+        return list.indexOf(element) === index &&
+            !list.some(other => other !== element && element.contains(other) && isPriceAdjustmentCandidate(other));
+    });
+}
+
+function applyPriceAdjustments(root) {
+    const config = getPriceAdjustmentConfig();
+    if (!config.active) {
+        restorePriceAdjustments(root);
+        return;
+    }
+
+    syncPriceAdjustmentBanner(config);
+    collectPriceAdjustmentCandidates(root).forEach(element => applyPriceAdjustmentToElement(element, config));
+}
+
 async function performPriceSort(order, gridContainer) {
     if (!gridContainer) return;
     
@@ -2194,6 +5972,7 @@ async function performPriceSort(order, gridContainer) {
             if (currentSettings.copyButtons) {
                 findAndInject();
             }
+            applyPriceAdjustments();
         }, 150);
         
     } catch (e) {
@@ -2494,6 +6273,7 @@ async function loadNextPage(gridContainer, page, debugElement) {
                 if (currentSettings.copyButtons) {
                     findAndInject();
                 }
+                applyPriceAdjustments(gridContainer);
             }, 150);
 
             return { success: true };
@@ -2709,74 +6489,33 @@ function injectNameSearchOnCard(card) {
 
     const button = document.createElement('button');
     button.type = 'button';
-    button.className = 'lekolar-copy-btn lekolar-hover-copy les-card-name-search-btn';
+    button.className = 'les-card-action-btn les-card-name-search-btn';
     button.dataset.type = 'similar-card-name';
     button.title = 'Find similar products from name';
     button.setAttribute('aria-label', 'Find similar products from name');
     button.setAttribute('aria-pressed', 'false');
 
-    const tooltip = document.createElement('span');
-    tooltip.className = 'tooltip';
-    tooltip.textContent = 'Find similar products';
-
     button.appendChild(createSearchSvg(16));
-    button.appendChild(tooltip);
     button.addEventListener('click', (e) => {
         e.preventDefault();
         e.stopPropagation();
         activateProductNameSearch(nameElement, button);
     });
 
-    const titleContainer = nameElement.closest('.product-title, .inner-title, h3, .product-name, .eS-productname') || nameElement.parentElement;
-    if (titleContainer && titleContainer !== nameElement && titleContainer.parentElement) {
-        titleContainer.appendChild(button);
-    } else if (nameElement.parentElement) {
-        nameElement.parentElement.insertBefore(button, nameElement.nextSibling);
-    }
+    const toolbar = ensureCardActionToolbar(card);
+    if (toolbar) insertCardAction(toolbar, button, 20);
 }
 
 function injectCopyButtonOnCard(card, number) {
-    if (card.querySelector('.lekolar-copy-btn[data-type="number"]')) return;
-
-    const btn = createCopyButton(number, 'number', {
-        getCopyContext: () => ({
-            number,
-            name: getProductCardName(card),
-            url: getProductCardUrl(card)
-        })
-    });
-    btn.classList.add('lekolar-hover-copy');
-
-    let target = card.querySelector('.product-artno, .eS-product-artno, [class*="artno"]');
-
-    if (target) {
-        target.textContent = `Tuotenro: ${number} `;
-        target.appendChild(btn);
-    } else {
-        target = card.querySelector('.product-title, .inner-title, h3, .product-name, [class*="title"], .eS-productname');
-        if (!target) target = card.querySelector('a') || card;
-        target.appendChild(btn);
-    }
+    ensureCardCopyAction(card);
+    const btn = card.querySelector('.les-card-copy-btn');
+    if (number) setCardProductNumber(card, number, btn);
 }
 
 async function handleProductCardHover(card) {
     injectNameSearchOnCard(card);
-
-    if (card.querySelector('.lekolar-copy-btn[data-type="number"]')) return;
-
-    const url = getProductCardUrl(card);
-    if (!url) return;
-
-    // Check cache first — instant show
-    if (fetchedProducts.has(url)) {
-        const number = fetchedProducts.get(url);
-        if (number) injectCopyButtonOnCard(card, number);
-        return;
-    }
-
-    // Direct fetch (bypass slow queue) for responsiveness
-    const number = await fetchProductNumberDirect(url);
-    if (number) injectCopyButtonOnCard(card, number);
+    ensureCardCopyAction(card);
+    injectCompareButtonOnCard(card);
 }
 
 function initHoverCopySystem() {
@@ -2932,6 +6671,11 @@ function initAll() {
         // Master switch off, or this country is disabled. Tear down any UI
         // that may have been injected before the flag flipped.
         cleanupRestrictedUi();
+        cleanupProductTreeUi();
+        cleanupProductNoteUi();
+        cleanupProductCardPptButton();
+        cleanupProductLayoutResizer();
+        restorePriceAdjustments();
         try { applyEnvironmentalLogoVisibility(); } catch (e) {}
         return;
     }
@@ -2942,6 +6686,11 @@ function initAll() {
 
     applyEnvironmentalLogoVisibility();
     compactSearchPage();
+    initProductTreeExplorer();
+    initProductLayoutResizer();
+    initProductComparisonUi();
+    initProductNotesUi();
+    applyPriceAdjustments();
     if (currentSettings.infiniteScroll) {
         initSearchConsolidation();
     }
@@ -2966,10 +6715,34 @@ window.addEventListener('load', () => {
     setTimeout(initAll, 300);
 }, { once: true });
 
+let productLayoutResizeTimeout = null;
+window.addEventListener('resize', () => {
+    clearTimeout(productLayoutResizeTimeout);
+    productLayoutResizeTimeout = setTimeout(() => {
+        if (!lesContentDisabled()) initProductLayoutResizer();
+    }, 150);
+});
+
 // Watch for settings changes
 chrome.storage.onChanged.addListener((changes, area) => {
     if (area === 'sync') {
         loadSettingsAndInit();
+        return;
+    }
+
+    if (area === 'local' && changes[PRODUCT_NOTES_STORAGE_KEY]) {
+        productNotesByKey = sanitizeProductNotesMap(changes[PRODUCT_NOTES_STORAGE_KEY].newValue);
+        productNotesLoaded = true;
+        syncProductNoteButtonState();
+        const panel = document.querySelector('.les-product-note-panel.is-open');
+        if (panel) renderProductNotePanel(panel, panel.__lesProductNoteMeta || getCurrentProductNoteMeta());
+    }
+
+    if (area === 'local' && changes[PRODUCT_LAYOUT_STORAGE_KEY]) {
+        productLayoutPreference = sanitizeProductLayoutPreference(changes[PRODUCT_LAYOUT_STORAGE_KEY].newValue);
+        productLayoutPreferenceLoaded = true;
+        syncProductLayoutResetButton();
+        initProductLayoutResizer();
     }
 });
 
@@ -2990,7 +6763,12 @@ const pageObserver = new MutationObserver((mutations) => {
         clearTimeout(mutationTimeout);
         mutationTimeout = setTimeout(() => {
             if (lesContentDisabled()) return;
+            initProductTreeExplorer();
+            initProductLayoutResizer();
             if (currentSettings.infiniteScroll) initSearchConsolidation();
+            initProductComparisonUi();
+            initProductNotesUi();
+            applyPriceAdjustments();
             if (currentSettings.copyButtons) {
                 findAndInject();
             }
@@ -3012,7 +6790,15 @@ function startPageObserverWhenReady() {
 startPageObserverWhenReady();
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    if (!message || message.action !== 'lesRefreshEntitlement') return;
+    if (!message || !message.action) return;
+
+    if (message.action === 'lesRefreshProductNotes') {
+        refreshProductNotesFromStorage();
+        sendResponse({ ok: true });
+        return;
+    }
+
+    if (message.action !== 'lesRefreshEntitlement') return;
 
     (async () => {
         try {

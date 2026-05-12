@@ -34,6 +34,17 @@ body {
     border-bottom: 1px solid #45475a;
 }
 
+.header-text {
+    flex: 1;
+    min-width: 0;
+}
+
+.header-title-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
 .permission-warning {
     margin: 10px 16px 0;
     padding: 8px 10px;
@@ -42,6 +53,18 @@ body {
     background: rgba(249, 226, 175, 0.12);
     color: #f9e2af;
     font-size: 11px;
+    line-height: 1.35;
+}
+
+.price-simulation-status {
+    margin: 10px 16px 0;
+    padding: 9px 10px;
+    border-radius: 6px;
+    border: 1px solid rgba(249, 226, 175, 0.65);
+    background: rgba(249, 226, 175, 0.16);
+    color: #f9e2af;
+    font-size: 12px;
+    font-weight: 700;
     line-height: 1.35;
 }
 
@@ -56,12 +79,68 @@ body {
     font-weight: 600;
     color: #cdd6f4;
     line-height: 1.2;
+    min-width: 0;
 }
 
 .version {
     font-size: 11px;
     color: #6c7086;
     font-weight: 400;
+}
+
+.share-addon-btn {
+    flex: 0 0 auto;
+    width: 26px;
+    height: 26px;
+    border: 1px solid #45475a;
+    border-radius: 6px;
+    background: rgba(137, 180, 250, 0.08);
+    color: #89b4fa;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: background-color 0.2s, border-color 0.2s, color 0.2s, transform 0.08s;
+}
+
+.share-addon-btn:hover,
+.share-addon-btn:focus-visible {
+    background: rgba(137, 180, 250, 0.18);
+    border-color: #89b4fa;
+    color: #b4befe;
+    outline: none;
+}
+
+.share-addon-btn:active {
+    transform: scale(0.96);
+}
+
+.share-addon-btn:disabled {
+    cursor: default;
+    opacity: 0.65;
+}
+
+.share-icon {
+    width: 15px;
+    height: 15px;
+    display: block;
+}
+
+.share-toast {
+    margin: 10px 16px 0;
+    padding: 8px 10px;
+    border-radius: 6px;
+    border: 1px solid rgba(166, 227, 161, 0.35);
+    background: rgba(166, 227, 161, 0.12);
+    color: #a6e3a1;
+    font-size: 11px;
+    line-height: 1.35;
+}
+
+.share-toast.error {
+    border-color: rgba(243, 139, 168, 0.35);
+    background: rgba(243, 139, 168, 0.12);
+    color: #f38ba8;
 }
 
 /* --- Master power button (uBlock-style) --- */
@@ -212,32 +291,4 @@ body {
 
 .primary-btn:active {
     transform: scale(0.98);
-}
-
-.link-btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 6px;
-    width: 100%;
-    margin-top: 8px;
-    padding: 4px;
-    background: transparent;
-    border: none;
-    color: #89b4fa;
-    font-size: 12px;
-    cursor: pointer;
-}
-
-.link-btn:hover {
-    color: #b4befe;
-    text-decoration: underline;
-}
-
-.whats-new-dot {
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    background: #f5c2e7;
-    box-shadow: 0 0 0 2px rgba(245, 194, 231, 0.25);
 }

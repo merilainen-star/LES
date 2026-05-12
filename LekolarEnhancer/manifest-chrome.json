@@ -50,6 +50,11 @@
         "*://*.lekolar.dk/*"
       ],
       "js": [
+        "defaults.js",
+        "searchUtils.js",
+        "vendor/pptxgen-prelude.js",
+        "vendor/pptxgen.bundle.js",
+        "vendor/pptxgen-global.js",
         "content.js"
       ],
       "css": [

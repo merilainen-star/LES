@@ -3,6 +3,7 @@
 
 const ENTITLEMENT_CACHE_KEY = 'lesSharePointEntitlement';
 const SHAREPOINT_PROBE_URL = 'https://lekolarab.sharepoint.com/_api/web/currentuser?$select=Id,Title';
+const EDGE_ADDON_URL = 'https://microsoftedge.microsoft.com/addons/detail/poiadopjpbekbageflcbghabcidpbjhj';
 const LEKOLAR_HOST_RULES = [
     { suffix: '.lekolar.fi', pattern: '*://*.lekolar.fi/*' },
     { suffix: '.lekolar.se', pattern: '*://*.lekolar.se/*' },
@@ -17,10 +18,12 @@ const permissionWarningEl = document.getElementById('permissionWarning');
 const recheckEntitlementBtn = document.getElementById('recheckEntitlementBtn');
 const entitlementStatusEl = document.getElementById('entitlementStatus');
 const openSettingsBtn = document.getElementById('openSettingsBtn');
-const openWhatsNewBtn = document.getElementById('openWhatsNewBtn');
-const whatsNewDot = document.getElementById('whatsNewDot');
+const shareAddonBtn = document.getElementById('shareAddonBtn');
+const shareToastEl = document.getElementById('shareToast');
+const priceSimulationStatusEl = document.getElementById('priceSimulationStatus');
 
 let isEnabled = true;
+let shareToastTimer = null;
 
 function paintPower() {
     powerBtn.classList.toggle('off', !isEnabled);
@@ -42,6 +45,36 @@ function loadPower() {
     });
 }
 
+function normalizePriceAdjustmentPercent(value) {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return 0;
+    return Math.min(Math.max(number, -100), 500);
+}
+
+function formatPriceAdjustmentPercent(percent) {
+    const rounded = Math.round(percent * 10) / 10;
+    const text = Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
+    return `${rounded > 0 ? '+' : ''}${text}%`;
+}
+
+function paintPriceSimulationStatus(settings) {
+    if (!priceSimulationStatusEl) return;
+    const enabled = Boolean(settings && settings.priceAdjustmentEnabled);
+    priceSimulationStatusEl.classList.toggle('hidden', !enabled);
+    if (!enabled) return;
+    const percent = normalizePriceAdjustmentPercent(settings.priceAdjustmentPercent);
+    priceSimulationStatusEl.textContent = `Price simulation ON: ${formatPriceAdjustmentPercent(percent)} shown on product prices.`;
+}
+
+function loadPriceSimulationStatus() {
+    chrome.storage.sync.get(null, (data) => {
+        const settings = (typeof lesMergeSettings === 'function')
+            ? lesMergeSettings(data)
+            : (data || {});
+        paintPriceSimulationStatus(settings);
+    });
+}
+
 powerBtn.addEventListener('click', () => {
     isEnabled = !isEnabled;
     paintPower();
@@ -56,17 +89,46 @@ openSettingsBtn.addEventListener('click', () => {
     }
 });
 
-openWhatsNewBtn.addEventListener('click', () => {
-    chrome.tabs.create({ url: chrome.runtime.getURL('options.html#whatsnew') });
-    chrome.storage.sync.set({ lastSeenVersion: chrome.runtime.getManifest().version });
-});
+function showShareToast(text, tone) {
+    if (!shareToastEl) return;
+    shareToastEl.textContent = text;
+    shareToastEl.classList.toggle('error', tone === 'error');
+    shareToastEl.classList.remove('hidden');
+    window.clearTimeout(shareToastTimer);
+    shareToastTimer = window.setTimeout(() => {
+        shareToastEl.classList.add('hidden');
+    }, 3600);
+}
 
-// "What's new" dot: show if stored lastSeenVersion != current.
-function paintWhatsNewDot() {
-    const current = chrome.runtime.getManifest().version;
-    chrome.storage.sync.get('lastSeenVersion', (data) => {
-        const seen = data && data.lastSeenVersion;
-        whatsNewDot.classList.toggle('hidden', seen === current);
+async function copyShareLinkToClipboard() {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(EDGE_ADDON_URL);
+        return;
+    }
+
+    const textArea = document.createElement('textarea');
+    textArea.value = EDGE_ADDON_URL;
+    textArea.setAttribute('readonly', '');
+    textArea.style.position = 'fixed';
+    textArea.style.top = '-1000px';
+    document.body.appendChild(textArea);
+    textArea.select();
+    const copied = document.execCommand('copy');
+    textArea.remove();
+    if (!copied) throw new Error('copy_failed');
+}
+
+if (shareAddonBtn) {
+    shareAddonBtn.addEventListener('click', async () => {
+        shareAddonBtn.disabled = true;
+        try {
+            await copyShareLinkToClipboard();
+            showShareToast('Link to add-on copied to clipboard. Please share it with a colleague :)');
+        } catch (error) {
+            showShareToast('Could not copy the add-on link automatically.', 'error');
+        } finally {
+            shareAddonBtn.disabled = false;
+        }
     });
 }
 
@@ -215,9 +277,20 @@ function checkLekolarPermissions() {
 // Init
 document.getElementById('versionLabel').textContent = 'v' + chrome.runtime.getManifest().version;
 loadPower();
-paintWhatsNewDot();
+loadPriceSimulationStatus();
 checkLekolarPermissions();
 loadCachedEntitlementStatus();
 if (recheckEntitlementBtn) {
     recheckEntitlementBtn.addEventListener('click', recheckEntitlementNow);
 }
+
+chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== 'sync') return;
+    if (
+        changes.priceAdjustmentEnabled ||
+        changes.priceAdjustmentPercent ||
+        changes.priceAdjustmentHighlightColor
+    ) {
+        loadPriceSimulationStatus();
+    }
+});

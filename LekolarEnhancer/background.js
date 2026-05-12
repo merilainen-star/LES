@@ -4,6 +4,9 @@
 if (typeof importScripts === 'function') {
     try {
         importScripts(
+            'vendor/pptxgen-prelude.js',
+            'vendor/pptxgen.bundle.js',
+            'vendor/pptxgen-global.js',
             'defaults.js',
             'searchUtils.js',
             'cryptoVault.js',
@@ -18,6 +21,62 @@ if (typeof importScripts === 'function') {
 }
 
 const LES_AI_FI_SEARCH_BASE = 'https://www.lekolar.fi/haku/';
+const LES_EXTERNAL_DATA_PERMISSIONS = ['searchTerms', 'websiteContent'];
+
+function lesStorageSyncGetAll() {
+    return new Promise(resolve => chrome.storage.sync.get(null, data => resolve(data || {})));
+}
+
+function lesGetPermissionsApi() {
+    if (typeof browser !== 'undefined' && browser.permissions) return browser.permissions;
+    if (typeof chrome !== 'undefined' && chrome.permissions) return chrome.permissions;
+    return null;
+}
+
+function lesPermissionsGetAll() {
+    const api = lesGetPermissionsApi();
+    if (!api || typeof api.getAll !== 'function') return Promise.resolve(null);
+    try {
+        const result = api.getAll();
+        if (result && typeof result.then === 'function') return result;
+    } catch (_) {
+        // Chrome-compatible callback API fallback.
+    }
+    return new Promise(resolve => {
+        try {
+            api.getAll(resolve);
+        } catch (_) {
+            resolve(null);
+        }
+    });
+}
+
+async function lesHasBuiltInExternalDataConsent() {
+    const perms = await lesPermissionsGetAll();
+    const data = perms && Array.isArray(perms.data_collection) ? perms.data_collection : null;
+    if (!Array.isArray(data)) return { supported: false, granted: false };
+    return {
+        supported: true,
+        granted: LES_EXTERNAL_DATA_PERMISSIONS.every(p => data.includes(p))
+    };
+}
+
+async function lesHasExternalServicesConsent(storedSettings) {
+    const stored = storedSettings || await lesStorageSyncGetAll();
+    const settings = (typeof lesMergeSettings === 'function')
+        ? lesMergeSettings(stored)
+        : { ...DEFAULT_SETTINGS, ...stored };
+    if (!settings.externalServicesConsent) return false;
+
+    const builtIn = await lesHasBuiltInExternalDataConsent();
+    return !builtIn.supported || builtIn.granted;
+}
+
+async function lesRequireExternalServicesConsent(storedSettings) {
+    if (!(await lesHasExternalServicesConsent(storedSettings))) {
+        throw new Error('external_services_consent_required');
+    }
+}
 
 function lesAiLookupVocabulary(userText) {
     const category = lesClassifyCategory(userText);
@@ -427,9 +486,250 @@ async function translateTextViaMyMemory(text, sourceLang, targetLang) {
     return { ok: true, translation: translatedParts.join(' ') };
 }
 
+const LES_PRODUCT_CARD_PPTX_MIME = 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+
+function lesProductCardStripControlChars(value) {
+    return String(value == null ? '' : value).replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '');
+}
+
+function lesProductCardSafeFileName(value) {
+    const cleaned = lesProductCardStripControlChars(value || 'product-card')
+        .replace(/[<>:"/\\|?*]/g, '-')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, 140)
+        .replace(/[. ]+$/g, '');
+    return cleaned || 'product-card';
+}
+
+function lesCreateProductCardFileName(product) {
+    const title = product && (product.title || product.name) ? (product.title || product.name) : 'Product card';
+    const sku = product && product.sku ? product.sku : '';
+    return `${lesProductCardSafeFileName(`${sku ? sku + ' - ' : ''}${title}`)}.pptx`;
+}
+
+function lesGetPptxGenConstructor() {
+    const root = typeof globalThis !== 'undefined'
+        ? globalThis
+        : (typeof window !== 'undefined' ? window : self);
+    let ctor = root.PptxGenJS || root.pptxgen || root.pptxgenjs;
+    if (!ctor && typeof window !== 'undefined') {
+        ctor = window.PptxGenJS || window.pptxgen || window.pptxgenjs;
+    }
+    if (!ctor && typeof PptxGenJS !== 'undefined') {
+        ctor = PptxGenJS;
+    }
+    if (!ctor) {
+        throw new Error('PptxGenJS is not loaded in the extension background context.');
+    }
+    return ctor.default || ctor;
+}
+
+function lesGetProductCardImagePlacement(imageSize, frame) {
+    if (!imageSize || !imageSize.width || !imageSize.height) return frame;
+
+    const aspect = imageSize.width / imageSize.height;
+    let h = frame.h;
+    let w = h * aspect;
+
+    if (w > frame.w) {
+        w = frame.w;
+        h = w / aspect;
+    }
+
+    return {
+        x: frame.x + ((frame.w - w) / 2),
+        y: frame.y + ((frame.h - h) / 2),
+        w,
+        h
+    };
+}
+
+function lesGetProductCardLogoPlacement(imageSize, frame) {
+    if (!imageSize || !imageSize.width || !imageSize.height) return frame;
+
+    const aspect = imageSize.width / imageSize.height;
+    let h = frame.h;
+    let w = h * aspect;
+
+    if (w > frame.w) {
+        w = frame.w;
+        h = w / aspect;
+    }
+
+    return {
+        x: frame.x,
+        y: frame.y + ((frame.h - h) / 2),
+        w,
+        h
+    };
+}
+
+function lesGetProductCardPptSettings(raw) {
+    if (typeof lesCloneProductCardPptSettings === 'function') {
+        return lesCloneProductCardPptSettings(raw);
+    }
+    return {
+        bannerColor: '#B5121B',
+        labels: { item: 'Item', description: 'Description', specifications: 'Specifications' },
+        linkFormat: { tokens: [{ type: 'url' }] }
+    };
+}
+
+function lesProductCardPptColor(value, fallback = 'B5121B') {
+    const color = String(value || '').trim();
+    return /^#[0-9a-f]{6}$/i.test(color) ? color.slice(1).toUpperCase() : fallback;
+}
+
+function lesTruncateProductCardText(value, maxLength) {
+    const text = String(value || '').replace(/\s+/g, ' ').trim();
+    if (!maxLength || text.length <= maxLength) return text;
+    return text.slice(0, Math.max(0, maxLength - 1)).trimEnd() + '...';
+}
+
+function lesGetProductCardLinkText(product, settings) {
+    const format = settings && settings.linkFormat ? settings.linkFormat : { tokens: [{ type: 'url' }] };
+    const context = {
+        number: product.sku || product.number || '',
+        name: product.title || product.name || '',
+        url: product.url || '',
+        value: product.url || ''
+    };
+    const text = typeof lesRenderCopyFormat === 'function'
+        ? lesRenderCopyFormat(format, context)
+        : context.url;
+    return lesTruncateProductCardText(text || context.url, 240);
+}
+
+function lesAddProductCardFooterLogos(slide, product) {
+    let x = 0.55;
+    const y = 6.78;
+    const maxRight = 5.75;
+    (product.environmentalLogos || []).forEach(logo => {
+        if (!logo || !logo.dataUri || x >= maxRight) return;
+        const box = lesGetProductCardLogoPlacement(logo.imageSize, { x, y, w: 1.05, h: 0.38 });
+        if (box.x + box.w > maxRight) return;
+        slide.addImage({
+            data: logo.dataUri,
+            x: box.x,
+            y: box.y,
+            w: box.w,
+            h: box.h
+        });
+        x = box.x + box.w + 0.16;
+    });
+
+    if (product.lekolarLogo && product.lekolarLogo.dataUri) {
+        const logoBox = lesGetProductCardLogoPlacement(product.lekolarLogo.imageSize, {
+            x: 11.75,
+            y: 6.76,
+            w: 0.95,
+            h: 0.42
+        });
+        slide.addImage({
+            data: product.lekolarLogo.dataUri,
+            x: 12.70 - logoBox.w,
+            y: logoBox.y,
+            w: logoBox.w,
+            h: logoBox.h
+        });
+    }
+}
+
+async function lesCreateProductCardPptx(product) {
+    const PptxGenJS = lesGetPptxGenConstructor();
+    const pptx = new PptxGenJS();
+    pptx.layout = 'LAYOUT_WIDE';
+    pptx.author = 'Lekolar Enhancer';
+    pptx.company = 'Lekolar';
+    pptx.subject = 'Product card';
+    pptx.title = product.title || 'Product card';
+    pptx.lang = 'en-US';
+
+    const slide = pptx.addSlide();
+    slide.background = { color: 'FFFFFF' };
+
+    const shapeType = pptx.ShapeType || {};
+    const rectShape = shapeType.rect || 'rect';
+    const pptSettings = lesGetProductCardPptSettings(product.pptSettings);
+    const accentColor = lesProductCardPptColor(pptSettings.bannerColor);
+    const imageData = product.imageData || '';
+    const title = product.title || 'Product card';
+    const skuText = product.sku ? `${pptSettings.labels.item} ${product.sku}` : 'Product card';
+    const descText = product.description || 'No product description found on page.';
+    const specLines = product.specs && product.specs.length ? product.specs : ['No product specifications found on page.'];
+    const specsText = specLines.map(line => `- ${line}`).join('\n');
+
+    slide.addShape(rectShape, { x: 0, y: 0, w: 13.333, h: 0.86, fill: { color: accentColor }, line: { color: accentColor } });
+    slide.addText(title, { x: 0.45, y: 0.12, w: 8.65, h: 0.62, margin: 0.04, fontFace: 'Arial', fontSize: 23, bold: true, color: 'FFFFFF', valign: 'middle', fit: 'shrink' });
+    slide.addText(skuText, { x: 9.25, y: 0.20, w: 3.45, h: 0.44, margin: 0.04, fontFace: 'Arial', fontSize: 12, bold: true, color: 'FFFFFF', align: 'right', valign: 'middle', fit: 'shrink' });
+
+    slide.addShape(rectShape, { x: 0.55, y: 1.35, w: 5.15, h: 4.65, fill: { color: 'F8FAFC' }, line: { color: 'E2E8F0', width: 1 } });
+    if (imageData) {
+        const imageBox = lesGetProductCardImagePlacement(product.imageSize, {
+            x: 0.65,
+            y: 1.45,
+            w: 4.95,
+            h: 4.45
+        });
+        slide.addImage({
+            data: imageData,
+            x: imageBox.x,
+            y: imageBox.y,
+            w: imageBox.w,
+            h: imageBox.h
+        });
+    } else {
+        slide.addText('No product image', { x: 0.75, y: 3.25, w: 4.75, h: 0.35, fontFace: 'Arial', fontSize: 16, color: '64748B', align: 'center' });
+    }
+
+    slide.addText(pptSettings.labels.description, { x: 6.05, y: 1.20, w: 6.65, h: 0.28, fontFace: 'Arial', fontSize: 12, bold: true, color: accentColor, margin: 0 });
+    slide.addText(descText, { x: 6.05, y: 1.55, w: 6.65, h: 1.48, fontFace: 'Arial', fontSize: 11, color: '1F2937', margin: 0.06, breakLine: false, fit: 'shrink', valign: 'top' });
+    slide.addText(pptSettings.labels.specifications, { x: 6.05, y: 3.23, w: 6.65, h: 0.28, fontFace: 'Arial', fontSize: 12, bold: true, color: accentColor, margin: 0 });
+    slide.addText(specsText, { x: 6.05, y: 3.58, w: 6.65, h: 2.28, fontFace: 'Arial', fontSize: 9.5, color: '1F2937', margin: 0.06, breakLine: false, fit: 'shrink', valign: 'top' });
+
+    if (product.url) {
+        slide.addText(lesGetProductCardLinkText(product, pptSettings), {
+            x: 0.55,
+            y: 6.18,
+            w: 12.15,
+            h: 0.38,
+            fontFace: 'Arial',
+            fontSize: 8,
+            color: '2563EB',
+            margin: 0,
+            hyperlink: { url: product.url, tooltip: 'Open product page' },
+            fit: 'shrink'
+        });
+    }
+
+    lesAddProductCardFooterLogos(slide, product);
+    const base64 = await pptx.write({ outputType: 'base64', compression: true });
+    return {
+        ok: true,
+        fileName: lesCreateProductCardFileName(product),
+        mimeType: LES_PRODUCT_CARD_PPTX_MIME,
+        base64
+    };
+}
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (!message || !message.action) {
         return;
+    }
+
+    if (message.action === 'lesCreateProductCardPptx') {
+        lesCreateProductCardPptx(message.product || {})
+            .then(sendResponse)
+            .catch((error) => {
+                console.error('LES: Background product card PPT generation failed:', error);
+                sendResponse({
+                    ok: false,
+                    error: (error && error.message) ? error.message : String(error)
+                });
+            });
+
+        return true;
     }
 
     if (message.action === 'probeSharePointEntitlement') {
@@ -469,6 +769,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                     sendResponse({ ok: false, error: 'beta_disabled' });
                     return;
                 }
+                await lesRequireExternalServicesConsent(stored);
                 const provider = message.provider || (stored && stored.aiProvider) || 'openai';
                 const model = message.model || (stored && stored.aiModels && stored.aiModels[provider]) || '';
                 const extracted = await lesAiResolveQueryViaProvider(
@@ -495,6 +796,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.action === 'lesAiTestKey') {
         (async () => {
             try {
+                const stored = await lesStorageSyncGetAll();
+                await lesRequireExternalServicesConsent(stored);
                 const apiKey = await lesVaultGetKey(message.provider);
                 if (!apiKey) {
                     sendResponse({ ok: false, error: 'missing_api_key' });
@@ -517,7 +820,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
 
     if (message.action === 'lesTranslateText') {
-        translateTextViaMyMemory(message.text, message.sourceLang, message.targetLang)
+        (async () => {
+            const stored = await lesStorageSyncGetAll();
+            await lesRequireExternalServicesConsent(stored);
+            return translateTextViaMyMemory(message.text, message.sourceLang, message.targetLang);
+        })()
             .then(sendResponse)
             .catch((error) => {
                 sendResponse({
