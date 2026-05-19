@@ -1,5 +1,9 @@
 # What's new
 
+## v1.29 — 2026-05-19
+
+- **Stable product column resizer in background tabs** — middle-clicking a product link no longer leaves the page rendered with an overlapping grid. Setup waits until the tab is visible and the page's columns have real dimensions before applying the resizable grid override.
+
 ## v1.28 - 2026-05-12
 
 - **AMO warning cleanup** removes raw HTML rendering from extension-owned UI and disables legacy eval-like fallbacks in the vendored PowerPoint runtime.

@@ -4808,8 +4808,16 @@ function measureProductLayout(elements) {
     const contentWidth = contentRect.width;
     if (!contentWidth || contentWidth < 920) return null;
 
-    const measuredImagesWidth = Math.round(elements.images.getBoundingClientRect().width || contentWidth * 0.34);
-    const measuredDetailsWidth = Math.round(elements.details.getBoundingClientRect().width || contentWidth * 0.25);
+    // Reject measurements when children haven't been laid out yet (background-tab
+    // hydration can fire callbacks before images/details have real widths). A
+    // silent fallback here would bake bad numbers into __lesProductLayoutState
+    // and stick — the grid override is !important.
+    const rawImagesWidth = elements.images.getBoundingClientRect().width;
+    const rawDetailsWidth = elements.details.getBoundingClientRect().width;
+    if (rawImagesWidth < 200 || rawDetailsWidth < 200) return null;
+
+    const measuredImagesWidth = Math.round(rawImagesWidth);
+    const measuredDetailsWidth = Math.round(rawDetailsWidth);
     const maxImagesWidth = Math.max(260, Math.round(contentWidth * 0.45));
     const imagesWidth = Math.round(clampProductLayoutNumber(measuredImagesWidth, 260, maxImagesWidth));
     const maxDetailsWidth = Math.round(contentWidth - imagesWidth - PRODUCT_LAYOUT_MIN_INFO_WIDTH - PRODUCT_LAYOUT_HANDLE_WIDTH);
@@ -5016,9 +5024,27 @@ function setupProductLayoutResizer(elements, preference) {
     syncProductLayoutResetButton(content);
 }
 
+let productLayoutVisibilityWaiter = null;
+
 function initProductLayoutResizer() {
     if (!document.body || isListPage() || window.innerWidth < 900 || currentSettings.productLayoutDivider === false) {
         cleanupProductLayoutResizer();
+        return;
+    }
+
+    // Background-tab rendering is throttled: getBoundingClientRect can return
+    // pre-hydration sizes, which would get baked into the grid. Defer until the
+    // tab is actually shown — the resizer isn't usable until then anyway.
+    if (document.visibilityState === 'hidden') {
+        if (productLayoutVisibilityWaiter) return;
+        productLayoutVisibilityWaiter = () => {
+            if (document.visibilityState !== 'hidden') {
+                document.removeEventListener('visibilitychange', productLayoutVisibilityWaiter);
+                productLayoutVisibilityWaiter = null;
+                initProductLayoutResizer();
+            }
+        };
+        document.addEventListener('visibilitychange', productLayoutVisibilityWaiter);
         return;
     }
 

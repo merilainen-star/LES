@@ -67,12 +67,19 @@ The extension injects utility buttons directly into the product page DOM to faci
 - **Action**: Creates a product-card PowerPoint file from the current product details and image.
 - **Runtime assets**: Uses the vendored `pptxgenjs` bundle shipped inside the extension package, with legacy eval-like polyfill fallbacks disabled for store validation.
 
-**8. Omnibox and SharePoint Search**
+**8. Product Column Divider**
+
+- **Location**: Product page, between the product info column and the product details column.
+- **Action**: Drag the vertical handle to resize the details column; click the reset button on the handle to restore the default ratio.
+- **Persistence**: The chosen ratio is saved in local browser storage and reapplied on later product pages.
+- **Stability**: Setup is deferred until the tab is visible and the column children have real dimensions, so a product page opened in a background tab (e.g. via middle-click) is never left with a broken grid.
+
+**9. Omnibox and SharePoint Search**
 
 - **Omnibox keyword**: Type `l` in the browser address bar to search Lekolar products.
 - **SharePoint**: Optional SharePoint search helpers use the declared `lekolarab.sharepoint.com` host permission.
 
-**9. AI Search and Swedish Source Translation**
+**10. AI Search and Swedish Source Translation**
 
 - **AI Search**: Optional beta feature that sends the typed query only to the selected AI provider after the user enables external services consent.
 - **Translation**: Optional helper that sends selected/source text to MyMemory only after the user enables external services consent.
