@@ -725,6 +725,7 @@ html.les-theme-black .les-spec-search-btn {
 }
 
 .les-buttons-bar .les-compare-btn-label,
+.les-buttons-bar .les-list-btn-label,
 .les-buttons-bar .les-product-note-btn-label,
 .les-buttons-bar .les-product-card-ppt-label,
 .les-buttons-bar .les-spec-search-label,
@@ -1456,6 +1457,7 @@ html.les-theme-black .les-product-tree-child-count {
 }
 
 .les-card-action-btn .les-compare-btn-label,
+.les-card-action-btn .les-list-btn-label,
 .les-card-action-btn .tooltip {
     display: none !important;
 }
@@ -1809,7 +1811,7 @@ html.les-theme-black .les-product-tree-child-count {
     position: fixed;
     top: 210px;
     left: 0;
-    width: 242px;
+    width: 330px;
     z-index: 99996;
     padding: 12px;
     background: #ffffff;
@@ -1818,7 +1820,7 @@ html.les-theme-black .les-product-tree-child-count {
     border-radius: 0 8px 8px 0;
     box-shadow: 0 16px 36px rgba(15, 23, 42, 0.18);
     box-sizing: border-box;
-    transform: translateX(-255px);
+    transform: translateX(-345px);
     opacity: 0;
     pointer-events: none;
     transition: transform 0.2s ease, opacity 0.2s ease;
@@ -1828,6 +1830,53 @@ html.les-theme-black .les-product-tree-child-count {
     transform: translateX(0);
     opacity: 1;
     pointer-events: auto;
+}
+
+.les-dock-tabs {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 12px;
+    border-bottom: 1px solid #e2e8f0;
+}
+
+.les-dock-tab {
+    flex: 1;
+    padding: 6px 10px;
+    border: none;
+    background: transparent;
+    color: #64748b;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+}
+
+.les-dock-tab:hover {
+    color: #0f766e;
+}
+
+.les-dock-tab.is-active {
+    color: #0f766e;
+    border-bottom-color: #0f766e;
+}
+
+.les-dock-body {
+    display: none;
+}
+
+.les-dock-body.is-active {
+    display: block;
+}
+
+.les-dock-actions-row {
+    display: flex;
+    gap: 6px;
+    margin-top: 6px;
+}
+
+.les-dock-actions-row button {
+    flex: 1;
 }
 
 .les-compare-panel-header {

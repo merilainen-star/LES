@@ -2837,6 +2837,7 @@ function initProductTreeExplorer() {
 // --- Product Comparison ---
 
 const COMPARE_STORAGE_KEY = 'lesProductComparisonItems';
+const LIST_STORAGE_KEY = 'lesProductListItems';
 const COMPARE_MIN_ITEMS = 2;
 const COMPARE_MAX_ITEMS = 4;
 const comparisonDetailsCache = new Map();
@@ -2845,6 +2846,9 @@ let comparisonItems = [];
 let comparisonStateLoaded = false;
 let comparisonStateLoadPromise = null;
 let comparisonUiRefreshQueued = false;
+let listItems = [];
+let listStateLoaded = false;
+let listStateLoadPromise = null;
 
 function normalizeCompareUrl(url) {
     if (!url) return '';
@@ -2946,7 +2950,79 @@ function queueComparisonUiRefresh() {
         comparisonUiRefreshQueued = false;
         renderComparePanel();
         syncCompareButtons();
+    syncListButtons();
     }, 0);
+}
+
+function ensureListStateLoaded() {
+    if (listStateLoaded) return Promise.resolve(listItems);
+    if (listStateLoadPromise) return listStateLoadPromise;
+
+    listStateLoadPromise = storageLocalGet(LIST_STORAGE_KEY)
+        .then(data => {
+            const stored = data && Array.isArray(data[LIST_STORAGE_KEY]) ? data[LIST_STORAGE_KEY] : [];
+            listItems = stored.map(sanitizeCompareItem).filter(Boolean);
+            listStateLoaded = true;
+            return listItems;
+        })
+        .catch(error => {
+            console.warn('LES: Could not load product list state', error);
+            listItems = [];
+            listStateLoaded = true;
+            return listItems;
+        })
+        .finally(() => {
+            listStateLoadPromise = null;
+        });
+
+    return listStateLoadPromise;
+}
+
+function persistListState() {
+    return storageLocalSet({ [LIST_STORAGE_KEY]: listItems }).catch(error => {
+        console.warn('LES: Could not save product list state', error);
+    });
+}
+
+function queueListUiRefresh() {
+    queueComparisonUiRefresh(); 
+}
+
+function findListIndex(itemOrId) {
+    const id = typeof itemOrId === 'string' ? itemOrId : getCompareItemId(itemOrId);
+    const url = typeof itemOrId === 'string' ? '' : normalizeCompareUrl(itemOrId && itemOrId.url);
+    const articleNumber = typeof itemOrId === 'string' ? '' : normalizeWhitespace(itemOrId && itemOrId.articleNumber);
+
+    return listItems.findIndex(item => {
+        if (item.id === id) return true;
+        if (url && item.url === url) return true;
+        return Boolean(articleNumber && item.articleNumber && item.articleNumber === articleNumber);
+    });
+}
+
+function isListItemSelected(itemOrId) {
+    return findListIndex(itemOrId) >= 0;
+}
+
+async function toggleListItem(rawItem) {
+    await ensureListStateLoaded();
+
+    const item = sanitizeCompareItem(rawItem);
+    if (!item) return;
+
+    const existingIndex = findListIndex(item);
+    if (existingIndex >= 0) {
+        listItems.splice(existingIndex, 1);
+        await persistListState();
+        queueListUiRefresh();
+        return;
+    }
+
+    listItems.push(item);
+    await persistListState();
+    currentDockTab = 'list';
+    queueListUiRefresh();
+    showCompareToast('Item added to list.');
 }
 
 function findComparisonIndex(itemOrId) {
@@ -3028,6 +3104,57 @@ function createCompareSvg(size = 14) {
     svg.appendChild(topHeadA);
     svg.appendChild(bottom);
     svg.appendChild(bottomHeadA);
+    return svg;
+}
+
+function createListSvg(size = 14) {
+    const svgNS = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(svgNS, 'svg');
+    svg.setAttribute('width', String(size));
+    svg.setAttribute('height', String(size));
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('fill', 'none');
+    svg.setAttribute('stroke', 'currentColor');
+    svg.setAttribute('stroke-width', '2');
+    svg.setAttribute('stroke-linecap', 'round');
+    svg.setAttribute('stroke-linejoin', 'round');
+
+    const path = document.createElementNS(svgNS, 'path');
+    path.setAttribute('d', 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z');
+    const poly = document.createElementNS(svgNS, 'polyline');
+    poly.setAttribute('points', '14 2 14 8 20 8');
+    
+    const l1 = document.createElementNS(svgNS, 'line');
+    l1.setAttribute('x1', '16');
+    l1.setAttribute('y1', '13');
+    l1.setAttribute('x2', '8');
+    l1.setAttribute('y2', '13');
+    const l2 = document.createElementNS(svgNS, 'line');
+    l2.setAttribute('x1', '16');
+    l2.setAttribute('y1', '17');
+    l2.setAttribute('x2', '8');
+    l2.setAttribute('y2', '17');
+    const l3 = document.createElementNS(svgNS, 'polyline');
+    l3.setAttribute('points', '10 9 9 9 8 9');
+
+    const plus1 = document.createElementNS(svgNS, 'line');
+    plus1.setAttribute('x1', '19');
+    plus1.setAttribute('y1', '3');
+    plus1.setAttribute('x2', '19');
+    plus1.setAttribute('y2', '7');
+    const plus2 = document.createElementNS(svgNS, 'line');
+    plus2.setAttribute('x1', '17');
+    plus2.setAttribute('y1', '5');
+    plus2.setAttribute('x2', '21');
+    plus2.setAttribute('y2', '5');
+
+    svg.appendChild(path);
+    svg.appendChild(poly);
+    svg.appendChild(l1);
+    svg.appendChild(l2);
+    svg.appendChild(l3);
+    svg.appendChild(plus1);
+    svg.appendChild(plus2);
     return svg;
 }
 
@@ -3198,6 +3325,44 @@ function updateCompareButtonState(button) {
     button.title = selected ? 'Remove from comparison' : 'Add to comparison';
     button.setAttribute('aria-label', selected ? 'Remove from comparison' : 'Add to comparison');
     if (label) label.textContent = selected ? 'Selected' : 'Compare';
+}
+
+function createListButton(meta, className) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = className.replace('les-compare-card-btn', 'les-list-card-btn').replace('les-product-compare-btn', 'les-product-list-btn');
+    button.dataset.listId = meta.id;
+    button.__lesListMeta = meta;
+    button.setAttribute('aria-pressed', 'false');
+
+    const label = document.createElement('span');
+    label.className = 'les-list-btn-label';
+    button.appendChild(createListSvg(14));
+    button.appendChild(label);
+
+    button.addEventListener('click', async (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        await toggleListItem(button.__lesListMeta);
+    });
+
+    updateListButtonState(button);
+    return button;
+}
+
+function updateListButtonState(button) {
+    if (!button) return;
+    const selected = isListItemSelected(button.__lesListMeta || button.dataset.listId);
+    const label = button.querySelector('.les-list-btn-label');
+    button.classList.toggle('is-selected', selected);
+    button.setAttribute('aria-pressed', selected ? 'true' : 'false');
+    button.title = selected ? 'Remove from list' : 'Add to list';
+    button.setAttribute('aria-label', selected ? 'Remove from list' : 'Add to list');
+    if (label) label.textContent = selected ? 'Listed' : 'Add to list';
+}
+
+function syncListButtons() {
+    document.querySelectorAll('.les-list-card-btn, .les-product-list-btn').forEach(updateListButtonState);
 }
 
 function syncCompareButtons() {
@@ -3425,7 +3590,7 @@ function ensureComparePanel() {
         'div',
         { className: 'les-compare-panel-header' },
         lesCreateElement('strong', { text: 'Product comparison' }),
-        lesCreateElement('span', { className: 'les-compare-count', text: `0/${COMPARE_MAX_ITEMS}` })
+        lesCreateElement('span', { className: 'les-compare-count', text: `${comparisonItems.length}/${COMPARE_MAX_ITEMS}` })
     );
     const list = lesCreateElement('div', { className: 'les-compare-list' });
     const openButton = lesCreateElement('button', { type: 'button', className: 'les-compare-open-btn', text: 'Compare products' });
@@ -3485,6 +3650,226 @@ function renderComparePanel() {
         row.appendChild(removeBtn);
         list.appendChild(row);
     });
+}
+
+function getCompanyCode() {
+    const host = window.location.hostname.toLowerCase();
+    if (host.includes('.fi')) return 'BF2';
+    if (host.includes('.no')) return 'BNO';
+    if (host.includes('.dk')) return 'BDK';
+    return 'BSE'; // default Sweden
+}
+
+function getVisibleCartContainer() {
+    // Two .mini-cart-container-content exist in the DOM; only one has real dimensions.
+    const visible = Array.from(document.querySelectorAll('.mini-cart-container-content'))
+        .find(el => el.getBoundingClientRect().width > 0);
+    return visible || document.querySelector('.cart-table');
+}
+
+function getCartItems() {
+    const items = [];
+    const scope = getVisibleCartContainer();
+    if (!scope) return items;
+
+    // Mini-cart flyout: scope to the visible container only
+    const miniCartRows = scope.querySelectorAll('li.js-miniCartItem');
+    if (miniCartRows.length > 0) {
+        miniCartRows.forEach(li => {
+            const artSpan = li.querySelector('.js-article-number[data-articlenumber]');
+            const articleNumber = artSpan ? artSpan.dataset.articlenumber : '';
+            if (!articleNumber) return;
+
+            const nameLink = li.querySelector('a.item-name, a.js-lineItemClick');
+            let name = '';
+            if (nameLink) {
+                name = (nameLink.getAttribute('title') || nameLink.textContent || '').trim();
+                const artSpanText = artSpan ? artSpan.textContent.trim() : '';
+                if (artSpanText) name = name.replace(artSpanText, '').trim();
+            }
+
+            const qtyInput = li.querySelector('input.js-miniCartQuantityField, input[class*="miniCartQuantity"]');
+            const quantity = qtyInput ? Math.max(1, parseInt(qtyInput.value || '1', 10)) : 1;
+
+            items.push({ articleNumber, name, quantity });
+        });
+        return items;
+    }
+
+    // Fallback: full cart page — scoped to visible container
+    scope.querySelectorAll('.cart-ul li, tbody tr').forEach(row => {
+        const artEl = row.querySelector('[data-articlenumber], .js-article-number');
+        const articleNumber = artEl ? (artEl.dataset.articlenumber || artEl.textContent.replace(/[^0-9A-Za-z-]/g, '')) : '';
+        if (!articleNumber) return;
+
+        const nameEl = row.querySelector('.item-name, .product-name, .js-lineItemClick');
+        const name = nameEl ? (nameEl.getAttribute('title') || nameEl.textContent).trim() : '';
+
+        const qtyInput = row.querySelector('input[type="number"], input[type="text"]');
+        const quantity = qtyInput ? Math.max(1, parseInt(qtyInput.value || '1', 10)) : 1;
+
+        items.push({ articleNumber, name, quantity });
+    });
+
+    return items;
+}
+
+function exportCartToCsv() {
+    const items = getCartItems();
+    if (items.length === 0) {
+        showCompareToast('Cart is empty or items could not be parsed.');
+        return;
+    }
+    
+    const company = getCompanyCode();
+    
+    const headers = [
+        'Quote', 'Company', 'Existing Product', 'Product number', 'Product configuration',
+        'Department', 'Quantity', 'Sales Quotation Status', 'Unit', 'Special Item name'
+    ];
+    
+    const rows = [headers.join(';')];
+    
+    items.forEach(item => {
+        const artNo = item.articleNumber || ''; // e.g. "30972-96U90"
+        const dashIdx = artNo.indexOf('-');
+        const artNoBase   = dashIdx >= 0 ? artNo.substring(0, dashIdx) : artNo;   // "30972"
+        const artNoConfig = dashIdx >= 0 ? artNo.substring(dashIdx + 1) : '';      // "96U90"
+        // Existing Product = base + config (no dash) + company code, e.g. "3097296U90BF2"
+        const existingProduct = artNoBase + artNoConfig + company;
+
+        const row = [
+            '',              // Quote
+            company,         // Company
+            existingProduct, // Existing Product
+            artNoBase,       // Product number
+            artNoConfig,     // Product configuration
+            '',              // Department
+            String(item.quantity), // Quantity
+            'Created',       // Sales Quotation Status
+            'PCS',           // Unit
+            ''               // Special Item name (empty for standard catalog products)
+        ];
+        rows.push(row.join(';'));
+    });
+    
+    const csvContent = rows.join('\n');
+    // Use a data: URI so Firefox extension CSP does not block the download
+    const dataUri = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csvContent);
+    const a = document.createElement('a');
+    a.href = dataUri;
+    a.setAttribute('download', 'Lekolar_Quotation_Cart_Import.csv');
+    a.style.cssText = 'position:fixed;top:-999px;left:-999px;';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => document.body.removeChild(a), 500);
+    console.log('[LES] CSV export triggered with', items.length, 'items');
+}
+
+function initCartExportUi() {
+    // Pick the VISIBLE .mini-cart-container-content — there are two in the DOM,
+    // one is a 0×0 hidden duplicate. We want the one with real dimensions.
+    const contentDiv = Array.from(document.querySelectorAll('.mini-cart-container-content'))
+        .find(el => el.getBoundingClientRect().width > 0);
+    const cartTable = document.querySelector('.cart-table');
+
+    const container = contentDiv || cartTable;
+    if (!container) return;
+
+    // Guard: don't inject twice
+    if (container.querySelector('.les-cart-export-actions')) return;
+
+    // Only inject when there are actually items in the cart
+    const hasItems = container.querySelector('li.js-miniCartItem, .cart-ul li, .cart-table tbody tr');
+    if (!hasItems) return;
+
+    console.log('[LES] Injecting cart export buttons into', container.className);
+
+    const actionRow = document.createElement('div');
+    actionRow.className = 'les-cart-export-actions';
+    // Use setAttribute style + !important via a <style> tag approach to override any site CSS
+    actionRow.setAttribute('style', [
+        'display:flex !important',
+        'flex-direction:row !important',
+        'gap:8px !important',
+        'width:100% !important',
+        'box-sizing:border-box !important',
+        'margin:8px 0 !important',
+        'padding:8px 0 !important',
+        'border-top:1px solid rgba(0,0,0,0.15) !important',
+        'min-height:44px !important',
+        'height:auto !important',
+        'overflow:visible !important',
+        'visibility:visible !important',
+        'opacity:1 !important'
+    ].join(';'));
+
+    function makeExportBtn(label, clickHandler) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.textContent = label;
+        btn.className = 'les-cart-export-btn';
+        btn.setAttribute('style', [
+            'display:inline-flex !important',
+            'align-items:center !important',
+            'justify-content:center !important',
+            'flex:1 1 0 !important',
+            'min-width:60px !important',
+            'min-height:36px !important',
+            'height:auto !important',
+            'width:auto !important',
+            'background:#107569 !important',
+            'color:#fff !important',
+            'border:none !important',
+            'border-radius:4px !important',
+            'padding:6px 10px !important',
+            'font-size:13px !important',
+            'font-weight:700 !important',
+            'cursor:pointer !important',
+            'box-sizing:border-box !important',
+            'visibility:visible !important',
+            'opacity:1 !important',
+            'overflow:visible !important',
+            'position:relative !important',
+            'z-index:9999 !important'
+        ].join(';'));
+        // Attach handler both ways to be safe
+        btn.onclick = clickHandler;
+        btn.addEventListener('click', clickHandler);
+        return btn;
+    }
+
+    const pptBtn = makeExportBtn('PPT', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        console.log('[LES] PPT button clicked');
+        alert('PPT export coming soon. Please use CSV for now.');
+    });
+
+    const csvBtn = makeExportBtn('CSV', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        console.log('[LES] CSV button clicked');
+        exportCartToCsv();
+    });
+
+    actionRow.appendChild(pptBtn);
+    actionRow.appendChild(csvBtn);
+
+    if (contentDiv) {
+        const kassalle = contentDiv.querySelector('a.button-submit');
+        if (kassalle) {
+            contentDiv.insertBefore(actionRow, kassalle);
+        } else {
+            contentDiv.appendChild(actionRow);
+        }
+    } else if (cartTable) {
+        const totals = document.querySelector('.cart-totals, .cart-actions');
+        if (totals) totals.appendChild(actionRow);
+        else cartTable.parentElement.appendChild(actionRow);
+    }
+
+    console.log('[LES] Cart export buttons injected. actionRow dims:', actionRow.getBoundingClientRect());
 }
 
 function closeCompareModal() {
@@ -3550,6 +3935,7 @@ async function openProductComparison() {
     await persistComparisonState();
     renderComparePanel();
     syncCompareButtons();
+    syncListButtons();
     renderComparisonTable(modal, comparisonItems);
 }
 
@@ -3823,6 +4209,7 @@ function initProductComparisonUi() {
         injectCompareControls();
         renderComparePanel();
         syncCompareButtons();
+    syncListButtons();
     });
 }
 
@@ -6818,6 +7205,7 @@ function initAll() {
     initProductTreeExplorer();
     initProductLayoutResizer();
     initProductComparisonUi();
+    initCartExportUi();
     initProductNotesUi();
     applyPriceAdjustments();
     if (currentSettings.infiniteScroll) {
@@ -6896,6 +7284,7 @@ const pageObserver = new MutationObserver((mutations) => {
             initProductLayoutResizer();
             if (currentSettings.infiniteScroll) initSearchConsolidation();
             initProductComparisonUi();
+            initCartExportUi();
             initProductNotesUi();
             applyPriceAdjustments();
             if (currentSettings.copyButtons) {
@@ -6917,6 +7306,63 @@ function startPageObserverWhenReady() {
 }
 
 startPageObserverWhenReady();
+
+// Dedicated observer for the mini-cart flyout.
+// Strategy: watch the .js-miniCart element's class attribute.
+// When the site adds 'cart-open', the flyout has just been opened and the
+// AJAX content is about to (or has just) rendered. We retry on a short
+// interval until .mini-cart-container-content appears, then inject.
+let miniCartObserver = null;
+let cartInjectRetryTimer = null;
+
+function tryInjectCartButtons(attempts) {
+    attempts = attempts || 0;
+    clearTimeout(cartInjectRetryTimer);
+    if (attempts > 20) return; // give up after 2 seconds
+
+    const contentDiv = document.querySelector('.mini-cart-container-content');
+    if (!contentDiv) {
+        // Content not rendered yet, retry
+        cartInjectRetryTimer = setTimeout(() => tryInjectCartButtons(attempts + 1), 100);
+        return;
+    }
+
+    // Already injected and still there
+    if (contentDiv.querySelector('.les-cart-export-actions')) return;
+
+    initCartExportUi();
+}
+
+function startMiniCartObserver() {
+    if (miniCartObserver) return;
+    const miniCartEl = document.querySelector('.js-miniCart');
+    if (!miniCartEl) return;
+
+    let wasOpen = miniCartEl.classList.contains('cart-open');
+
+    miniCartObserver = new MutationObserver(() => {
+        const isOpen = miniCartEl.classList.contains('cart-open');
+        if (isOpen && !wasOpen) {
+            // Cart just opened — start trying to inject
+            tryInjectCartButtons(0);
+        }
+        wasOpen = isOpen;
+    });
+    miniCartObserver.observe(miniCartEl, { attributes: true, attributeFilter: ['class'] });
+
+    // If cart is already open on page load, inject immediately
+    if (wasOpen) tryInjectCartButtons(0);
+}
+
+// Try once on load, and again after the page settles
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', startMiniCartObserver);
+} else {
+    startMiniCartObserver();
+}
+window.addEventListener('load', () => {
+    startMiniCartObserver();
+}, { once: true });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (!message || !message.action) return;
