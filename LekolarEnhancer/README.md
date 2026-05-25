@@ -74,7 +74,17 @@ The extension injects utility buttons directly into the product page DOM to faci
 - **Persistence**: The chosen ratio is saved in local browser storage and reapplied on later product pages.
 - **Stability**: Setup is deferred until the tab is visible and the column children have real dimensions, so a product page opened in a background tab (e.g. via middle-click) is never left with a broken grid.
 
-**9. Omnibox and SharePoint Search**
+**9. Cart Quotation Export**
+
+- **Location**: Mini-cart flyout, above the checkout (Kassalle) button. Appears automatically when the cart contains items.
+- **CSV button**: Downloads a semicolon-delimited file formatted for the Microsoft Dynamics 365 CE quotation mass-import template.
+  - Article number (e.g. `30972-96U90`) is split at the dash: the part before the dash becomes **Product number** (`30972`), the part after becomes **Product configuration** (`96U90`).
+  - **Existing Product** is the concatenation of both parts without the dash plus the company code: `3097296U90BF2`.
+  - Company code is detected automatically from the hostname: `.fi` → `BF2`, `.no` → `BNO`, `.dk` → `BDK`, all others → `BSE`.
+  - Quantities are read directly from the cart quantity input fields.
+- **PPT button**: Placeholder for a future PowerPoint product-card export (shows a toast for now).
+
+**10. Omnibox and SharePoint Search**
 
 - **Omnibox keyword**: Type `l` in the browser address bar to search Lekolar products.
 - **SharePoint**: Optional SharePoint search helpers use the declared `lekolarab.sharepoint.com` host permission.

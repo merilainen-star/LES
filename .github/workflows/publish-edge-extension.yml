@@ -11,6 +11,9 @@ on:
       - 'scripts/**'
       - '.github/workflows/publish-edge-extension.yml'
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   # ── 1. Detect changed targets and read release version ────────────────────
   prepare-release:

@@ -1,5 +1,9 @@
 # What's new
 
+## v1.30 — 2026-05-22
+
+- **Cart quotation export** — PPT and CSV buttons appear in the mini-cart flyout above the checkout button whenever the cart contains items. Clicking CSV downloads a semicolon-delimited file pre-formatted for the Microsoft Dynamics 365 CE mass-import template: article number is split at the dash into *Product number* and *Product configuration*, and the *Existing Product* key is constructed as `<base><config><company>` (e.g. `3097296U90BF2`). Company code is detected automatically from the site domain (`.fi` → `BF2`, `.no` → `BNO`, `.dk` → `BDK`, default → `BSE`).
+
 ## v1.29 — 2026-05-19
 
 - **Stable product column resizer in background tabs** — middle-clicking a product link no longer leaves the page rendered with an overlapping grid. Setup waits until the tab is visible and the page's columns have real dimensions before applying the resizable grid override.
