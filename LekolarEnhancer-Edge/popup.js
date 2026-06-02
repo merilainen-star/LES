@@ -15,18 +15,35 @@ const powerBtn = document.getElementById('powerBtn');
 const powerLabel = document.getElementById('powerLabel');
 const powerHint = document.getElementById('powerHint');
 const permissionWarningEl = document.getElementById('permissionWarning');
+const refreshPageBtn = document.getElementById('refreshPageBtn');
 const recheckEntitlementBtn = document.getElementById('recheckEntitlementBtn');
 const entitlementStatusEl = document.getElementById('entitlementStatus');
 const openSettingsBtn = document.getElementById('openSettingsBtn');
 const shareAddonBtn = document.getElementById('shareAddonBtn');
 const shareToastEl = document.getElementById('shareToast');
 const priceSimulationStatusEl = document.getElementById('priceSimulationStatus');
+const statHostEl = document.getElementById('statHost');
+const statEnabledFeaturesEl = document.getElementById('statEnabledFeatures');
+const statSharePointAgeEl = document.getElementById('statSharePointAge');
 
 let isEnabled = true;
 let shareToastTimer = null;
+let refreshNeeded = false;
+
+const FEATURE_STAT_KEYS = [
+    'infiniteScroll',
+    'copyButtons',
+    'productLayoutDivider',
+    'variantHints',
+    'priceAdjustmentEnabled',
+    'aiBetaEnabled',
+    'externalServicesConsent',
+    'debugLogging'
+];
 
 function paintPower() {
     powerBtn.classList.toggle('off', !isEnabled);
+    if (refreshPageBtn) refreshPageBtn.classList.toggle('hidden', !refreshNeeded);
     if (isEnabled) {
         powerLabel.textContent = 'Enabled';
         powerLabel.style.color = '#a6e3a1';
@@ -77,9 +94,23 @@ function loadPriceSimulationStatus() {
 
 powerBtn.addEventListener('click', () => {
     isEnabled = !isEnabled;
+    refreshNeeded = true;
     paintPower();
     chrome.storage.sync.set({ extensionEnabled: isEnabled });
 });
+
+if (refreshPageBtn) {
+    refreshPageBtn.addEventListener('click', () => {
+        refreshPageBtn.disabled = true;
+        withActiveTab((tab) => {
+            if (!tab || !tab.id) {
+                refreshPageBtn.disabled = false;
+                return;
+            }
+            chrome.tabs.reload(tab.id, () => window.close());
+        });
+    });
+}
 
 openSettingsBtn.addEventListener('click', () => {
     if (chrome.runtime.openOptionsPage) {
@@ -138,6 +169,10 @@ function setEntitlementStatus(text, tone) {
     entitlementStatusEl.textContent = text;
     entitlementStatusEl.classList.remove('ok', 'warn', 'error');
     if (tone) entitlementStatusEl.classList.add(tone);
+    if (recheckEntitlementBtn) {
+        recheckEntitlementBtn.classList.remove('ok', 'warn', 'error');
+        if (tone) recheckEntitlementBtn.classList.add(tone);
+    }
 }
 
 function renderEntitlementStatus(result) {
@@ -220,10 +255,50 @@ function notifyActiveTabRefresh() {
     });
 }
 
+function formatAge(checkedAt) {
+    if (!checkedAt) return 'never';
+    const ageMs = Math.max(0, Date.now() - Number(checkedAt));
+    const minutes = Math.round(ageMs / 60000);
+    if (minutes < 1) return 'now';
+    if (minutes < 60) return `${minutes}m`;
+    const hours = Math.round(minutes / 60);
+    if (hours < 48) return `${hours}h`;
+    return `${Math.round(hours / 24)}d`;
+}
+
+function countEnabledFeatures(settings) {
+    return FEATURE_STAT_KEYS.reduce((count, key) => count + (settings && settings[key] === true ? 1 : 0), 0);
+}
+
+function updateNerdStats() {
+    withActiveTab((tab) => {
+        if (statHostEl) {
+            try {
+                statHostEl.textContent = tab && tab.url ? new URL(tab.url).hostname.replace(/^www\./, '') : '-';
+            } catch (e) {
+                statHostEl.textContent = '-';
+            }
+        }
+    });
+
+    chrome.storage.sync.get(null, (data) => {
+        const settings = (typeof lesMergeSettings === 'function')
+            ? lesMergeSettings(data)
+            : (data || {});
+        if (statEnabledFeaturesEl) statEnabledFeaturesEl.textContent = String(countEnabledFeatures(settings));
+    });
+
+    if (!chrome.storage || !chrome.storage.local || !statSharePointAgeEl) return;
+    chrome.storage.local.get(ENTITLEMENT_CACHE_KEY, (data) => {
+        const result = data && data[ENTITLEMENT_CACHE_KEY];
+        statSharePointAgeEl.textContent = formatAge(result && result.checkedAt);
+    });
+}
+
 async function recheckEntitlementNow() {
     if (!recheckEntitlementBtn) return;
     recheckEntitlementBtn.disabled = true;
-    recheckEntitlementBtn.textContent = 'Checking...';
+    recheckEntitlementBtn.title = 'Checking SharePoint connection';
     setEntitlementStatus('Status: Checking SharePoint access...', 'warn');
 
     const result = await requestEntitlementProbe();
@@ -238,7 +313,8 @@ async function recheckEntitlementNow() {
     }
 
     recheckEntitlementBtn.disabled = false;
-    recheckEntitlementBtn.textContent = 'Re-check';
+    recheckEntitlementBtn.title = 'Check SharePoint connection';
+    updateNerdStats();
 }
 
 // --- Lekolar host permission warning (kept from old popup) ---
@@ -280,6 +356,7 @@ loadPower();
 loadPriceSimulationStatus();
 checkLekolarPermissions();
 loadCachedEntitlementStatus();
+updateNerdStats();
 if (recheckEntitlementBtn) {
     recheckEntitlementBtn.addEventListener('click', recheckEntitlementNow);
 }
@@ -292,5 +369,6 @@ chrome.storage.onChanged.addListener((changes, area) => {
         changes.priceAdjustmentHighlightColor
     ) {
         loadPriceSimulationStatus();
+        updateNerdStats();
     }
 });

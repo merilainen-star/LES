@@ -341,6 +341,192 @@
 
 .narrow-input { max-width: 110px; flex: 0 0 110px; }
 
+.layout-fields {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 8px;
+}
+
+.layout-row {
+    display: grid;
+    grid-template-columns: 130px repeat(5, 1fr);
+    gap: 8px;
+    align-items: center;
+}
+
+.layout-row.is-header {
+    color: #a6adc8;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding-bottom: 2px;
+}
+
+.layout-row .layout-block-label {
+    font-size: 12px;
+    color: #cdd6f4;
+}
+
+.layout-row input[type="number"] {
+    width: 100%;
+    padding: 6px 8px;
+    background: #313244;
+    color: #cdd6f4;
+    border: 1px solid #45475a;
+    border-radius: 6px;
+    font-size: 12px;
+    outline: none;
+    min-width: 0;
+}
+
+.layout-row input[type="number"]:focus { border-color: #89b4fa; }
+
+.layout-row input[type="number"].is-invalid { border-color: #f38ba8; }
+
+/* Slide preview — stage is rendered at full slide dimensions in cm; the
+   scale transform is set dynamically by JS so the canvas fills its frame. */
+.layout-preview-frame {
+    width: 100%;
+    aspect-ratio: 33.87 / 19.05;
+    max-width: 100%;
+    overflow: hidden;
+    position: relative;
+    border: 1px solid #45475a;
+    border-radius: 6px;
+    background: #11111b;
+    margin: 12px 0 6px;
+}
+
+.layout-preview-stage {
+    width: 33.87cm;
+    height: 19.05cm;
+    position: relative;
+    transform: scale(0.5);
+    transform-origin: top left;
+    background: #FFFFFF;
+    color: #1F2937;
+}
+
+.layout-preview-stage .snap-guide {
+    position: absolute;
+    pointer-events: none;
+    z-index: 6;
+}
+
+.layout-preview-stage .snap-guide-v {
+    top: 0;
+    width: 0;
+    height: 19.05cm;
+    border-left: 1px dashed #f9e2af;
+}
+
+.layout-preview-stage .snap-guide-h {
+    left: 0;
+    width: 33.87cm;
+    height: 0;
+    border-top: 1px dashed #f9e2af;
+}
+
+.layout-preview-stage .block {
+    position: absolute;
+    box-sizing: border-box;
+    overflow: hidden;
+    font-family: Arial, sans-serif;
+    line-height: 1.2;
+}
+
+.layout-preview-stage .block.is-focused {
+    outline: 2px dashed #f9e2af;
+    outline-offset: -1px;
+    z-index: 10;
+}
+
+.layout-preview-stage .block-banner-bg {
+    left: 0;
+    top: 0;
+    width: 33.87cm;
+}
+
+.layout-preview-stage .block-title,
+.layout-preview-stage .block-sku {
+    color: #FFFFFF;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    padding: 0 0.1cm;
+}
+
+.layout-preview-stage .block-sku {
+    justify-content: flex-end;
+}
+
+.layout-preview-stage .block-image-frame {
+    background: #F8FAFC;
+    border: 1px solid #E2E8F0;
+    color: #64748B;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    font-size: 16pt;
+}
+
+.layout-preview-stage .block-label {
+    font-weight: 700;
+    padding: 0;
+}
+
+.layout-preview-stage .block-text {
+    padding: 0.15cm;
+    color: #1F2937;
+}
+
+.layout-preview-stage .block-link {
+    color: #2563EB;
+    padding: 0;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.layout-preview-stage .block[data-block] {
+    cursor: move;
+}
+
+.layout-preview-stage .block[data-block]:hover {
+    outline: 1px solid rgba(180, 190, 254, 0.55);
+    outline-offset: -1px;
+}
+
+.layout-preview-stage .resize-handle {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    width: 0.45cm;
+    height: 0.45cm;
+    background: rgba(180, 190, 254, 0.85);
+    border-top: 1px solid rgba(255, 255, 255, 0.7);
+    border-left: 1px solid rgba(255, 255, 255, 0.7);
+    cursor: nwse-resize;
+    z-index: 5;
+}
+
+body.layout-dragging {
+    user-select: none;
+    cursor: grabbing !important;
+}
+
+.layout-preview-stage .block-footer-placeholder {
+    background: rgba(100, 116, 139, 0.12);
+    border: 1px dashed #94a3b8;
+    color: #64748B;
+    font-size: 9pt;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+}
+
 .color-input {
     width: 54px;
     height: 34px;

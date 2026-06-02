@@ -8,6 +8,7 @@ let currentSettings = (typeof lesMergeSettings === 'function')
         copyButtons: true,
         hideEnvironmentalLogo: false,
         productLayoutDivider: true,
+        variantHints: true,
         priceAdjustmentEnabled: false,
         priceAdjustmentPercent: 0,
         priceAdjustmentHighlightColor: '#fff3bf',
@@ -1271,10 +1272,11 @@ function lesCleanElementText(element) {
     return normalizeWhitespace(clone.textContent || '');
 }
 
-function getCurrentProductSpecsForPpt() {
+function extractProductSpecsForPptFromDoc(doc) {
+    const root = doc || document;
     const specs = [];
     const seen = new Set();
-    const rows = document.querySelectorAll(
+    const rows = root.querySelectorAll(
         '.product-properties tr, .product-properties li, .product-properties .d-flex, ' +
         '.product-attributes tr, .product-attributes li, .product-attributes .d-flex, ' +
         '.product-details tr, .product-details li, .product-details .d-flex, ' +
@@ -1325,12 +1327,16 @@ function getCurrentProductSpecsForPpt() {
     return specs.slice(0, 18);
 }
 
+function getCurrentProductSpecsForPpt() {
+    return extractProductSpecsForPptFromDoc(document);
+}
+
 function extractProductDataFromPage() {
-    const number = normalizeWhitespace(getMainProductNumber() || getSelectedVariantArticleNumber() || getMainProductCode() || '');
+    const number = normalizeWhitespace(getSelectedVariantArticleNumber() || getMainProductNumber() || getMainProductCode() || '');
     const title = truncateProductCardText(getProductName() || document.title.replace(/\s*\|\s*Lekolar.*$/i, ''), 130);
     const description = truncateProductCardText(getCurrentDescriptionText(), 620);
     const specs = getCurrentProductSpecsForPpt().map(line => truncateProductCardText(line, 160));
-    const url = window.location.href.split('#')[0];
+    const url = buildProductCardVariantUrl(window.location.href, number);
     const imageUrl = getMainProductImageUrl();
     const environmentalLogos = extractProductCardEnvironmentalLogos();
 
@@ -1353,17 +1359,232 @@ function extractProductDataFromPage() {
     };
 }
 
-function resolveProductCardAssetUrl(value) {
+function extractVariantArticleNumberFromUrl(url) {
+    try {
+        const variant = new URL(url, window.location.href).searchParams.get('variant');
+        return normalizeWhitespace(variant || '');
+    } catch (_) {
+        return '';
+    }
+}
+
+function isProductCardVariantArticleNumber(articleNumber) {
+    return /^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)+$/.test(normalizeWhitespace(articleNumber || ''));
+}
+
+function buildProductCardVariantUrl(url, articleNumber) {
+    const rawUrl = normalizeWhitespace(url || '');
+    if (!rawUrl) return '';
+
+    try {
+        const parsed = new URL(rawUrl, window.location.href);
+        const variant = normalizeWhitespace(articleNumber || parsed.searchParams.get('variant') || '');
+        parsed.hash = '';
+        if (isProductCardVariantArticleNumber(variant)) {
+            parsed.searchParams.set('variant', variant);
+        }
+        return parsed.href;
+    } catch (_) {
+        return rawUrl.split('#')[0];
+    }
+}
+
+function extractProductDataFromDoc(doc, productUrl, fallback = {}) {
+    const resolvedUrl = normalizeWhitespace((doc && doc.__lesFetchedUrl) || productUrl || fallback.url || '');
+    const fallbackArticle = normalizeWhitespace(fallback.articleNumber || fallback.sku || fallback.number || '');
+    const number = normalizeWhitespace(fallbackArticle || extractVariantArticleNumberFromUrl(resolvedUrl) || extractProductNumberFromDoc(doc) || '');
+    const productCardUrl = buildProductCardVariantUrl(resolvedUrl, number);
+    const title = truncateProductCardText(
+        extractProductNameFromDoc(doc) || fallback.name || fallback.title || number || 'Product card',
+        130
+    );
+    const description = truncateProductCardText(
+        extractProductDescriptionFromDoc(doc) || fallback.description || fallback.shortDescription || '',
+        620
+    );
+    const specs = extractProductSpecsForPptFromDoc(doc).map(line => truncateProductCardText(line, 160));
+    const imageUrl = extractProductImageFromDoc(doc, resolvedUrl || window.location.href, number) || fallback.imageUrl || '';
+    const environmentalLogos = extractProductCardEnvironmentalLogosFromDoc(doc, resolvedUrl || window.location.href);
+
+    return {
+        sku: number,
+        number,
+        title: title || number || 'Product card',
+        name: title || number || 'Product card',
+        description,
+        specs,
+        imageUrl,
+        environmentalLogos,
+        url: productCardUrl || resolvedUrl,
+        countryCode: getCurrentCountryCode(),
+        quantity: Math.max(1, parseInt(fallback.quantity || '1', 10) || 1),
+        department: normalizeWhitespace(fallback.department || '')
+    };
+}
+
+function createFallbackCartProductData(item, error) {
+    const number = normalizeWhitespace(item && item.articleNumber || '');
+    const title = truncateProductCardText((item && item.name) || number || 'Product card', 130);
+    const specs = [];
+    if (error) {
+        specs.push(truncateProductCardText(`Load status: ${(error && error.message) ? error.message : String(error)}`, 160));
+    }
+
+    return {
+        sku: number,
+        number,
+        title,
+        name: title,
+        description: '',
+        specs,
+        imageUrl: item && item.imageUrl ? item.imageUrl : '',
+        environmentalLogos: [],
+        url: buildProductCardVariantUrl(item && item.url ? item.url : '', number),
+        countryCode: getCurrentCountryCode(),
+        quantity: Math.max(1, parseInt(item && item.quantity || '1', 10) || 1),
+        department: normalizeWhitespace(item && item.department || '')
+    };
+}
+
+function resolveProductCardAssetUrl(value, baseUrl = window.location.href) {
     const raw = String(value || '').trim();
     if (!raw) return '';
     try {
-        return new URL(raw, window.location.href).href;
+        return new URL(raw, baseUrl || window.location.href).href;
     } catch (_) {
         return raw;
     }
 }
 
-function extractProductCardEnvironmentalLogos() {
+const PRODUCT_CARD_ENVIRONMENTAL_LOGO_TOKENS = [
+    'fsc',
+    'pefc',
+    'mobelfakta',
+    'ecolabel',
+    'eco label',
+    'nordic',
+    'swan',
+    'svan',
+    'joutsen',
+    'ymparisto',
+    'miljo',
+    'toxicfree',
+    'toxic free',
+    'haitta aineeton',
+    'giftfri',
+    'gots',
+    'oeko',
+    'oekotex',
+    'blauer engel',
+    'greenguard',
+    'cradle to cradle',
+    'circularity'
+];
+
+const PRODUCT_CARD_PROMOTIONAL_LOGO_TOKENS = [
+    'kampanja',
+    'kampanj',
+    'campaign',
+    'campaigns',
+    'bestseller',
+    'best seller',
+    'uutuus',
+    'uutuudet',
+    'nyhet',
+    'nyhed',
+    'sale',
+    'tarjous',
+    'offer',
+    'discount',
+    'rabatt',
+    'rea'
+];
+
+const PRODUCT_CARD_PROMOTIONAL_LOGO_STEMS = [
+    'kampanj',
+    'campaign',
+    'bestseller',
+    'uutu',
+    'nyhet',
+    'nyhed'
+];
+
+function foldProductCardLogoSignal(value) {
+    return normalizeWhitespace(value)
+        .toLowerCase()
+        .replace(/[åäæ]/g, 'a')
+        .replace(/[öø]/g, 'o')
+        .replace(/[éè]/g, 'e');
+}
+
+function escapeProductCardLogoRegExp(value) {
+    return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function productCardLogoSignalMatches(signal, tokens) {
+    return tokens.some(token => {
+        const foldedToken = foldProductCardLogoSignal(token);
+        if (!foldedToken) return false;
+        const tokenPattern = escapeProductCardLogoRegExp(foldedToken).replace(/\s+/g, '[^a-z0-9]+');
+        return new RegExp(`(^|[^a-z0-9])${tokenPattern}([^a-z0-9]|$)`).test(signal);
+    });
+}
+
+function productCardLogoSignalContains(signal, tokens) {
+    return tokens.some(token => {
+        const foldedToken = foldProductCardLogoSignal(token);
+        return foldedToken && signal.includes(foldedToken);
+    });
+}
+
+function getProductCardLogoSignal(img, url, label) {
+    const parts = [
+        label,
+        url,
+        img.getAttribute('class') || '',
+        img.getAttribute('id') || '',
+        img.getAttribute('aria-label') || '',
+        img.getAttribute('data-flag') || '',
+        img.getAttribute('data-label') || ''
+    ];
+
+    let parent = img.parentElement;
+    for (let depth = 0; parent && depth < 3; depth += 1, parent = parent.parentElement) {
+        parts.push(
+            parent.getAttribute('class') || '',
+            parent.getAttribute('id') || '',
+            parent.getAttribute('title') || '',
+            parent.getAttribute('aria-label') || '',
+            parent.getAttribute('data-flag') || '',
+            parent.getAttribute('data-label') || ''
+        );
+    }
+
+    return foldProductCardLogoSignal(parts.join(' '));
+}
+
+function isProductCardProductFlagLogo(img) {
+    return !!img.closest('.product-flags, [class*="product-flag"]');
+}
+
+function shouldIncludeProductCardEnvironmentalLogo(img, url, label) {
+    const signal = getProductCardLogoSignal(img, url, label);
+    if (
+        productCardLogoSignalMatches(signal, PRODUCT_CARD_PROMOTIONAL_LOGO_TOKENS) ||
+        productCardLogoSignalContains(signal, PRODUCT_CARD_PROMOTIONAL_LOGO_STEMS)
+    ) {
+        return false;
+    }
+
+    if (isProductCardProductFlagLogo(img)) {
+        return productCardLogoSignalMatches(signal, PRODUCT_CARD_ENVIRONMENTAL_LOGO_TOKENS);
+    }
+
+    return true;
+}
+
+function extractProductCardEnvironmentalLogosFromDoc(doc, baseUrl = window.location.href) {
+    const root = doc || document;
     const logos = [];
     const seen = new Set();
     const selectors = [
@@ -1377,16 +1598,32 @@ function extractProductCardEnvironmentalLogos() {
         'img[class*=" symbol-"]'
     ].join(', ');
 
-    document.querySelectorAll(selectors).forEach(img => {
+    root.querySelectorAll(selectors).forEach(img => {
         const src = img.currentSrc || img.src || img.getAttribute('src') || '';
-        const url = resolveProductCardAssetUrl(src);
+        const url = resolveProductCardAssetUrl(src, baseUrl);
         if (!url || seen.has(url)) return;
         const label = normalizeWhitespace(img.getAttribute('alt') || img.getAttribute('title') || '');
+        if (!shouldIncludeProductCardEnvironmentalLogo(img, url, label)) return;
         seen.add(url);
         logos.push({ url, label });
     });
 
     return logos.slice(0, 8);
+}
+
+function extractProductCardEnvironmentalLogos() {
+    return extractProductCardEnvironmentalLogosFromDoc(document, window.location.href);
+}
+
+const PRODUCT_CARD_LEKOLAR_LOGO_PATH = 'assets/lekolar-logo.svg';
+
+function getProductCardExtensionAssetUrl(path) {
+    try {
+        if (chrome && chrome.runtime && typeof chrome.runtime.getURL === 'function') {
+            return chrome.runtime.getURL(path);
+        }
+    } catch (_) {}
+    return '';
 }
 
 async function imageUrlToDataUri(url) {
@@ -1553,6 +1790,16 @@ async function hydrateProductCardLogo(logo) {
     };
 }
 
+async function hydrateProductCardLekolarLogo() {
+    const url = getProductCardExtensionAssetUrl(PRODUCT_CARD_LEKOLAR_LOGO_PATH);
+    const dataUri = await imageUrlToDataUri(url);
+    if (!dataUri) return null;
+    return {
+        dataUri,
+        imageSize: await getProductCardImageSize(dataUri)
+    };
+}
+
 async function hydrateProductCardVisualAssets(product) {
     const output = {
         ...product,
@@ -1566,16 +1813,7 @@ async function hydrateProductCardVisualAssets(product) {
 
     const rawEnvLogos = Array.isArray(output.environmentalLogos) ? output.environmentalLogos : [];
     output.environmentalLogos = (await Promise.all(rawEnvLogos.slice(0, 8).map(hydrateProductCardLogo))).filter(Boolean);
-
-    if (!output.lekolarLogo && chrome.runtime && chrome.runtime.getURL) {
-        const logoData = await imageUrlToDataUri(chrome.runtime.getURL('logo.png'));
-        if (logoData) {
-            output.lekolarLogo = {
-                dataUri: logoData,
-                imageSize: await getProductCardImageSize(logoData)
-            };
-        }
-    }
+    output.lekolarLogo = output.lekolarLogo || await hydrateProductCardLekolarLogo();
 
     return output;
 }
@@ -1715,6 +1953,169 @@ async function requestProductCardPptxFromBackground(product) {
     }
 }
 
+function sendProductCardDeckPptxBackgroundRequest(products, fileName) {
+    return new Promise((resolve, reject) => {
+        chrome.runtime.sendMessage(
+            {
+                action: 'lesCreateProductCardDeckPptx',
+                products,
+                fileName
+            },
+            (response) => {
+                if (chrome.runtime.lastError) {
+                    reject(new Error(chrome.runtime.lastError.message));
+                    return;
+                }
+                if (!response || response.ok !== true || !response.base64) {
+                    reject(new Error((response && response.error) ? response.error : 'background_pptx_failed'));
+                    return;
+                }
+
+                const blob = productCardBase64ToBlob(response.base64, response.mimeType);
+                triggerProductCardBlobDownload(blob, response.fileName || fileName || 'Lekolar_Cart_Product_Cards.pptx');
+                resolve();
+            }
+        );
+    });
+}
+
+async function requestProductCardDeckPptxFromBackground(products, fileName) {
+    try {
+        await sendProductCardDeckPptxBackgroundRequest(products, fileName);
+    } catch (error) {
+        if (!products || !products.some(product => product && product.imageData)) throw error;
+        console.warn('LES: Background cart PPT generation failed with image data. Retrying without images.', error);
+        const productsWithoutImages = products.map(product => ({ ...product, imageData: '' }));
+        await sendProductCardDeckPptxBackgroundRequest(productsWithoutImages, fileName);
+    }
+}
+
+const LES_PRODUCT_CARD_MASTER_NAME = 'LES_PRODUCT_CARD';
+
+function getProductCardTemplate(settings) {
+    const tpl = settings && settings.template;
+    if (tpl && typeof tpl === 'object') return tpl;
+    if (typeof lesCloneProductCardPptTemplate === 'function') {
+        return lesCloneProductCardPptTemplate(null);
+    }
+    return null;
+}
+
+function createProductCardDeck(PptxGenJS, title, subject = 'Product card', pptSettings = null) {
+    const pptx = new PptxGenJS();
+    pptx.layout = 'LAYOUT_WIDE';
+    pptx.author = 'Lekolar Enhancer';
+    pptx.company = 'Lekolar';
+    pptx.subject = subject;
+    pptx.title = title || subject || 'Product card';
+    pptx.lang = 'en-US';
+
+    const settings = pptSettings || getProductCardPptSettings();
+    const template = getProductCardTemplate(settings);
+    const accentColor = productCardPptColor(settings.bannerColor);
+    const bgColor = productCardPptColor(template && template.background, 'FFFFFF');
+    const bannerHcm = (template && template.banner && template.banner.h) || 2.18;
+    const shapeType = (pptx.ShapeType) || {};
+    const rectShape = shapeType.rect || 'rect';
+
+    pptx.defineSlideMaster({
+        title: LES_PRODUCT_CARD_MASTER_NAME,
+        background: { color: bgColor },
+        objects: [
+            { rect: { x: 0, y: 0, w: 13.333, h: lesCmToIn(bannerHcm), fill: { color: accentColor }, line: { color: accentColor } } }
+        ]
+    });
+
+    pptx._lesProductCardCtx = { template, accentColor, bgColor, rectShape };
+    return pptx;
+}
+
+function addProductCardSlide(pptx, productForPpt) {
+    const pptSettings = productForPpt.pptSettings || getProductCardPptSettings();
+    const ctx = pptx._lesProductCardCtx || {
+        template: getProductCardTemplate(pptSettings),
+        accentColor: productCardPptColor(pptSettings.bannerColor),
+        bgColor: productCardPptColor((pptSettings.template && pptSettings.template.background), 'FFFFFF'),
+        rectShape: (pptx.ShapeType && pptx.ShapeType.rect) || 'rect'
+    };
+    const template = ctx.template;
+    const accentColor = ctx.accentColor;
+    const rectShape = ctx.rectShape;
+    const blocks = (template && template.blocks) || {};
+    const slide = pptx.addSlide({ masterName: LES_PRODUCT_CARD_MASTER_NAME });
+
+    const imageData = productForPpt.imageData || '';
+    const title = productForPpt.title || 'Product card';
+    const skuText = productForPpt.sku ? `${pptSettings.labels.item} ${productForPpt.sku}` : 'Product card';
+    const descText = productForPpt.description || 'No product description found on page.';
+    const specLines = productForPpt.specs && productForPpt.specs.length ? productForPpt.specs : ['No product specifications found on page.'];
+    const specsText = specLines.map(line => `- ${line}`).join('\n');
+
+    const inBox = (b) => ({ x: lesCmToIn(b.x), y: lesCmToIn(b.y), w: lesCmToIn(b.w), h: lesCmToIn(b.h) });
+
+    const titleB = inBox(blocks.title);
+    const skuB = inBox(blocks.sku);
+    slide.addText(title, { ...titleB, margin: 0.04, fontFace: 'Arial', fontSize: blocks.title.fontSize, bold: true, color: 'FFFFFF', valign: 'middle', fit: 'shrink' });
+    slide.addText(skuText, { ...skuB, margin: 0.04, fontFace: 'Arial', fontSize: blocks.sku.fontSize, bold: true, color: 'FFFFFF', align: 'right', valign: 'middle', fit: 'shrink' });
+
+    const imageCm = blocks.image;
+    const imageB = inBox(imageCm);
+    const imagePadIn = lesCmToIn(lesIsFiniteNumber(imageCm.pad) ? imageCm.pad : 0.25);
+    slide.addShape(rectShape, { ...imageB, fill: { color: 'F8FAFC' }, line: { color: 'E2E8F0', width: 1 } });
+    if (imageData) {
+        const imageBox = getProductCardImagePlacement(productForPpt.imageSize, {
+            x: imageB.x + imagePadIn,
+            y: imageB.y + imagePadIn,
+            w: imageB.w - imagePadIn * 2,
+            h: imageB.h - imagePadIn * 2
+        });
+        slide.addImage({ data: imageData, x: imageBox.x, y: imageBox.y, w: imageBox.w, h: imageBox.h });
+    } else {
+        slide.addText('No product image', {
+            x: imageB.x + imagePadIn,
+            y: imageB.y + (imageB.h - 0.35) / 2,
+            w: imageB.w - imagePadIn * 2,
+            h: 0.35,
+            fontFace: 'Arial', fontSize: 16, color: '64748B', align: 'center'
+        });
+    }
+
+    const dL = inBox(blocks.descLabel), dB = inBox(blocks.desc), sL = inBox(blocks.specsLabel), sB = inBox(blocks.specs);
+    slide.addText(pptSettings.labels.description, { ...dL, fontFace: 'Arial', fontSize: blocks.descLabel.fontSize, bold: true, color: accentColor, margin: 0 });
+    slide.addText(descText, { ...dB, fontFace: 'Arial', fontSize: blocks.desc.fontSize, color: '1F2937', margin: 0.06, breakLine: false, fit: 'shrink', valign: 'top' });
+    slide.addText(pptSettings.labels.specifications, { ...sL, fontFace: 'Arial', fontSize: blocks.specsLabel.fontSize, bold: true, color: accentColor, margin: 0 });
+    slide.addText(specsText, { ...sB, fontFace: 'Arial', fontSize: blocks.specs.fontSize, color: '1F2937', margin: 0.06, breakLine: false, fit: 'shrink', valign: 'top' });
+
+    const departmentText = normalizeWhitespace(productForPpt.department || '');
+    if (departmentText && pptSettings.showDepartment !== false && blocks.departmentLabel && blocks.department) {
+        const deptLabelB = inBox(blocks.departmentLabel);
+        const deptB = inBox(blocks.department);
+        slide.addText(pptSettings.labels.department || 'Department', {
+            ...deptLabelB,
+            fontFace: 'Arial', fontSize: blocks.departmentLabel.fontSize, bold: true,
+            color: accentColor, margin: 0, fit: 'shrink'
+        });
+        slide.addText(departmentText, {
+            ...deptB,
+            fontFace: 'Arial', fontSize: blocks.department.fontSize, bold: true,
+            color: '1F2937', margin: 0, fit: 'shrink'
+        });
+    }
+
+    if (productForPpt.url) {
+        const lB = inBox(blocks.link);
+        slide.addText(getProductCardLinkText(productForPpt, pptSettings), {
+            ...lB,
+            fontFace: 'Arial', fontSize: blocks.link.fontSize, color: '2563EB', margin: 0,
+            hyperlink: { url: productForPpt.url, tooltip: 'Open product page' },
+            fit: 'shrink'
+        });
+    }
+
+    addProductCardFooterLogos(slide, productForPpt, template);
+    return slide;
+}
+
 async function generateProductCardPptx(product) {
     const productForPpt = await hydrateProductCardVisualAssets(product);
 
@@ -1728,107 +2129,66 @@ async function generateProductCardPptx(product) {
         return;
     }
 
-    const pptx = new PptxGenJS();
-    pptx.layout = 'LAYOUT_WIDE';
-    pptx.author = 'Lekolar Enhancer';
-    pptx.company = 'Lekolar';
-    pptx.subject = 'Product card';
-    pptx.title = productForPpt.title || 'Product card';
-    pptx.lang = 'en-US';
-
-    const slide = pptx.addSlide();
-    slide.background = { color: 'FFFFFF' };
-
-    const shapeType = pptx.ShapeType || {};
-    const rectShape = shapeType.rect || 'rect';
-    const pptSettings = productForPpt.pptSettings || getProductCardPptSettings();
-    const accentColor = productCardPptColor(pptSettings.bannerColor);
-    const imageData = productForPpt.imageData || '';
-    const title = productForPpt.title || 'Product card';
-    const skuText = productForPpt.sku ? `${pptSettings.labels.item} ${productForPpt.sku}` : 'Product card';
-    const descText = productForPpt.description || 'No product description found on page.';
-    const specLines = productForPpt.specs && productForPpt.specs.length ? productForPpt.specs : ['No product specifications found on page.'];
-    const specsText = specLines.map(line => `- ${line}`).join('\n');
-
-    slide.addShape(rectShape, { x: 0, y: 0, w: 13.333, h: 0.86, fill: { color: accentColor }, line: { color: accentColor } });
-    slide.addText(title, { x: 0.45, y: 0.12, w: 8.65, h: 0.62, margin: 0.04, fontFace: 'Arial', fontSize: 23, bold: true, color: 'FFFFFF', valign: 'middle', fit: 'shrink' });
-    slide.addText(skuText, { x: 9.25, y: 0.20, w: 3.45, h: 0.44, margin: 0.04, fontFace: 'Arial', fontSize: 12, bold: true, color: 'FFFFFF', align: 'right', valign: 'middle', fit: 'shrink' });
-
-    slide.addShape(rectShape, { x: 0.55, y: 1.35, w: 5.15, h: 4.65, fill: { color: 'F8FAFC' }, line: { color: 'E2E8F0', width: 1 } });
-    if (imageData) {
-        const imageBox = getProductCardImagePlacement(productForPpt.imageSize, {
-            x: 0.65,
-            y: 1.45,
-            w: 4.95,
-            h: 4.45
-        });
-        slide.addImage({
-            data: imageData,
-            x: imageBox.x,
-            y: imageBox.y,
-            w: imageBox.w,
-            h: imageBox.h
-        });
-    } else {
-        slide.addText('No product image', { x: 0.75, y: 3.25, w: 4.75, h: 0.35, fontFace: 'Arial', fontSize: 16, color: '64748B', align: 'center' });
-    }
-
-    slide.addText(pptSettings.labels.description, { x: 6.05, y: 1.20, w: 6.65, h: 0.28, fontFace: 'Arial', fontSize: 12, bold: true, color: accentColor, margin: 0 });
-    slide.addText(descText, { x: 6.05, y: 1.55, w: 6.65, h: 1.48, fontFace: 'Arial', fontSize: 11, color: '1F2937', margin: 0.06, breakLine: false, fit: 'shrink', valign: 'top' });
-    slide.addText(pptSettings.labels.specifications, { x: 6.05, y: 3.23, w: 6.65, h: 0.28, fontFace: 'Arial', fontSize: 12, bold: true, color: accentColor, margin: 0 });
-    slide.addText(specsText, { x: 6.05, y: 3.58, w: 6.65, h: 2.28, fontFace: 'Arial', fontSize: 9.5, color: '1F2937', margin: 0.06, breakLine: false, fit: 'shrink', valign: 'top' });
-
-    if (productForPpt.url) {
-        slide.addText(getProductCardLinkText(productForPpt, pptSettings), {
-            x: 0.55,
-            y: 6.18,
-            w: 12.15,
-            h: 0.38,
-            fontFace: 'Arial',
-            fontSize: 8,
-            color: '2563EB',
-            margin: 0,
-            hyperlink: { url: productForPpt.url, tooltip: 'Open product page' },
-            fit: 'shrink'
-        });
-    }
-
-    addProductCardFooterLogos(slide, productForPpt);
+    const pptx = createProductCardDeck(PptxGenJS, productForPpt.title || 'Product card', 'Product card', productForPpt.pptSettings);
+    addProductCardSlide(pptx, productForPpt);
     await writeProductCardPptx(pptx, createProductCardFileName(productForPpt));
 }
 
-function addProductCardFooterLogos(slide, product) {
-    let x = 0.55;
-    const y = 6.78;
-    const maxRight = 5.75;
+async function generateCartProductCardsPptx(products, fileName) {
+    const rawProducts = Array.isArray(products) ? products : [];
+    if (rawProducts.length === 0) throw new Error('No cart products found for PPT.');
+
+    const hydratedProducts = [];
+    for (const product of rawProducts) {
+        hydratedProducts.push(await hydrateProductCardVisualAssets(product));
+    }
+
+    let PptxGenJS;
+    try {
+        PptxGenJS = getPptxGenConstructor();
+    } catch (error) {
+        if (!isPptxLibraryMissingError(error)) throw error;
+        console.warn('LES: PptxGenJS is not available in the content script. Trying background cart PPTX generation.', error);
+        await requestProductCardDeckPptxFromBackground(hydratedProducts, fileName);
+        return;
+    }
+
+    const pptx = createProductCardDeck(PptxGenJS, 'Lekolar cart product cards', 'Cart product cards', hydratedProducts[0] && hydratedProducts[0].pptSettings);
+    hydratedProducts.forEach(product => addProductCardSlide(pptx, product));
+    await writeProductCardPptx(pptx, fileName || 'Lekolar_Cart_Product_Cards.pptx');
+}
+
+function addProductCardFooterLogos(slide, product, template) {
+    const footer = (template && template.footer) || {};
+    const envCm = footer.envLogos || { y: 17.22, h: 0.97, slotW: 2.67, startX: 1.40, maxRight: 14.61, gap: 0.41 };
+    const lekCm = footer.lekolarLogo || { rightX: 32.26, y: 17.17, w: 2.41, h: 1.07 };
+    const env = {
+        y: lesCmToIn(envCm.y), h: lesCmToIn(envCm.h), slotW: lesCmToIn(envCm.slotW),
+        startX: lesCmToIn(envCm.startX), maxRight: lesCmToIn(envCm.maxRight), gap: lesCmToIn(envCm.gap)
+    };
+    const lek = {
+        rightX: lesCmToIn(lekCm.rightX), y: lesCmToIn(lekCm.y),
+        w: lesCmToIn(lekCm.w), h: lesCmToIn(lekCm.h)
+    };
+
+    let x = env.startX;
     (product.environmentalLogos || []).forEach(logo => {
-        if (!logo || !logo.dataUri || x >= maxRight) return;
-        const box = getProductCardLogoPlacement(logo.imageSize, { x, y, w: 1.05, h: 0.38 });
-        if (box.x + box.w > maxRight) return;
-        slide.addImage({
-            data: logo.dataUri,
-            x: box.x,
-            y: box.y,
-            w: box.w,
-            h: box.h
-        });
-        x = box.x + box.w + 0.16;
+        if (!logo || !logo.dataUri || x >= env.maxRight) return;
+        const box = getProductCardLogoPlacement(logo.imageSize, { x, y: env.y, w: env.slotW, h: env.h });
+        if (box.x + box.w > env.maxRight) return;
+        slide.addImage({ data: logo.dataUri, x: box.x, y: box.y, w: box.w, h: box.h });
+        x = box.x + box.w + env.gap;
     });
 
-    if (product.lekolarLogo && product.lekolarLogo.dataUri) {
-        const logoBox = getProductCardLogoPlacement(product.lekolarLogo.imageSize, {
-            x: 11.75,
-            y: 6.76,
-            w: 0.95,
-            h: 0.42
+    const lekolarLogo = product && product.lekolarLogo;
+    if (lekolarLogo && lekolarLogo.dataUri) {
+        const box = getProductCardLogoPlacement(lekolarLogo.imageSize, {
+            x: lek.rightX - lek.w,
+            y: lek.y,
+            w: lek.w,
+            h: lek.h
         });
-        slide.addImage({
-            data: product.lekolarLogo.dataUri,
-            x: 12.70 - logoBox.w,
-            y: logoBox.y,
-            w: logoBox.w,
-            h: logoBox.h
-        });
+        slide.addImage({ data: lekolarLogo.dataUri, x: box.x, y: box.y, w: box.w, h: box.h });
     }
 }
 
@@ -2890,6 +3250,7 @@ function sanitizeCompareItem(raw) {
         toxicFree: raw.toxicFree || '',
         series: normalizeWhitespace(raw.series || ''),
         seatHeight: normalizeWhitespace(raw.seatHeight || ''),
+        price: raw.price && typeof raw.price === 'object' ? { value: Number(raw.price.value) || 0, display: normalizeWhitespace(raw.price.display || '') } : null,
         productProperties: Array.isArray(raw.productProperties) ? raw.productProperties : [],
         loadError: raw.loadError || '',
         fetchedAt: raw.fetchedAt || 0
@@ -3514,6 +3875,7 @@ function buildCompareMetaFromCard(card) {
         articleNumber: extractProductNumberFromCard(card),
         shortDescription: getProductCardDescription(card),
         flags: extractComparisonSymbolLabels(card),
+        price: extractCardDisplayPrice(card),
         source: 'list'
     });
 
@@ -3530,6 +3892,7 @@ function buildCompareMetaFromCurrentProduct() {
         articleNumber: getMainProductNumber(),
         shortDescription: extractProductDescriptionFromDoc(document),
         flags: extractComparisonSymbolLabels(document),
+        price: extractLiveProductPagePrice(),
         source: 'product-page'
     });
 }
@@ -3611,14 +3974,25 @@ function ensureComparePanel() {
     return panel;
 }
 
+function removeComparePanel() {
+    const panel = document.querySelector('.les-compare-panel');
+    if (panel) panel.remove();
+}
+
 function renderComparePanel() {
     if (!document.body || !comparisonStateLoaded) return;
+
+    if (comparisonItems.length === 0) {
+        removeComparePanel();
+        return;
+    }
+
     const panel = ensureComparePanel();
     const count = panel.querySelector('.les-compare-count');
     const list = panel.querySelector('.les-compare-list');
     const openBtn = panel.querySelector('.les-compare-open-btn');
 
-    panel.classList.toggle('is-open', comparisonItems.length > 0);
+    panel.classList.add('is-open');
     if (count) count.textContent = `${comparisonItems.length}/${COMPARE_MAX_ITEMS}`;
     if (openBtn) {
         openBtn.disabled = comparisonItems.length < COMPARE_MIN_ITEMS;
@@ -3660,7 +4034,120 @@ function getCompanyCode() {
     return 'BSE'; // default Sweden
 }
 
+function normalizeCartProductUrl(value) {
+    const url = resolveProductCardAssetUrl(value);
+    if (!/^https?:\/\//i.test(url)) return '';
+    try {
+        const parsed = new URL(url, window.location.href);
+        parsed.hash = '';
+        return parsed.href;
+    } catch (_) {
+        return url;
+    }
+}
+
+function getCartRowProductUrl(row, link) {
+    const target = link || row.querySelector('a.item-name, a.js-lineItemClick, a[href*="/verkkokauppa/"], a[href*="/sortiment/"]');
+    const href = target ? (target.getAttribute('href') || target.href || '') : '';
+    return normalizeCartProductUrl(href);
+}
+
+function getCartRowImageUrl(row) {
+    const image = row.querySelector('img');
+    if (!image) return '';
+    return resolveProductCardAssetUrl(image.currentSrc || image.src || image.getAttribute('src') || '');
+}
+
+function getCheckoutCartLineItemId(row) {
+    const input = row ? row.querySelector('input.js-checkoutCartLineItemId') : null;
+    return input ? normalizeWhitespace(input.value || input.getAttribute('value') || '') : '';
+}
+
+function getCheckoutCartDepartment(row) {
+    const lineId = getCheckoutCartLineItemId(row);
+    let departmentInput = null;
+
+    if (lineId) {
+        const cartTable = row.closest('table');
+        const rows = cartTable ? cartTable.querySelectorAll('tbody tr.js-checkoutCartItem') : [];
+        for (const candidate of rows) {
+            if (candidate === row) continue;
+            if (getCheckoutCartLineItemId(candidate) !== lineId) continue;
+            departmentInput = candidate.querySelector('input.js-checkoutCartCommentField, td.comment input[placeholder="Osasto"]');
+            if (departmentInput) break;
+        }
+    }
+
+    if (!departmentInput && row.nextElementSibling) {
+        departmentInput = row.nextElementSibling.querySelector('input.js-checkoutCartCommentField, td.comment input[placeholder="Osasto"]');
+    }
+
+    return departmentInput ? normalizeWhitespace(departmentInput.value || '') : '';
+}
+
+function getCheckoutCartUrl() {
+    const cartButton = document.querySelector('.js-cartButton[data-checkouturl]');
+    const rawUrl = cartButton ? cartButton.getAttribute('data-checkouturl') : '/kassa/';
+    try {
+        return new URL(rawUrl || '/kassa/', window.location.href).href;
+    } catch (_) {
+        return `${window.location.origin}/kassa/`;
+    }
+}
+
+async function fetchCheckoutCartDocument() {
+    const response = await fetch(getCheckoutCartUrl(), {
+        credentials: 'include',
+        cache: 'no-store',
+        redirect: 'follow'
+    });
+    if (!response.ok) throw new Error(`checkout_cart_http_${response.status}`);
+    const html = await response.text();
+    return new DOMParser().parseFromString(html, 'text/html');
+}
+
+function buildDepartmentQueuesFromCheckoutDoc(doc) {
+    const queues = new Map();
+    if (!doc) return queues;
+
+    doc.querySelectorAll('table.js-checkoutCartItems tbody tr.product-item, table.cart-items tbody tr.product-item').forEach(row => {
+        const artEl = row.querySelector('[data-articlenumber], .js-article-number, .js-article-number-only, .article-number-only, .lekolar-copy-btn[data-value]');
+        const articleNumber = artEl ? normalizeWhitespace(artEl.dataset.articlenumber || artEl.dataset.value || artEl.textContent.replace(/[^0-9A-Za-z-]/g, '')) : '';
+        if (!articleNumber) return;
+
+        const department = getCheckoutCartDepartment(row);
+        if (!queues.has(articleNumber)) queues.set(articleNumber, []);
+        queues.get(articleNumber).push(department);
+    });
+
+    return queues;
+}
+
+async function enrichCartItemsWithCheckoutDepartments(items) {
+    if (!Array.isArray(items) || items.length === 0) return items;
+    if (items.every(item => normalizeWhitespace(item.department || ''))) return items;
+
+    try {
+        const checkoutDoc = await fetchCheckoutCartDocument();
+        const departmentQueues = buildDepartmentQueuesFromCheckoutDoc(checkoutDoc);
+        if (departmentQueues.size === 0) return items;
+
+        return items.map(item => {
+            if (normalizeWhitespace(item.department || '')) return item;
+            const queue = departmentQueues.get(item.articleNumber);
+            if (!queue || queue.length === 0) return item;
+            return { ...item, department: queue.shift() || '' };
+        });
+    } catch (error) {
+        console.warn('LES: Checkout department lookup failed. Exporting CSV without mini-cart departments.', error);
+        return items;
+    }
+}
+
 function getVisibleCartContainer() {
+    const checkoutCart = document.querySelector('table.js-checkoutCartItems, table.cart-items');
+    if (checkoutCart && checkoutCart.querySelector('tbody tr')) return checkoutCart;
+
     // Two .mini-cart-container-content exist in the DOM; only one has real dimensions.
     const visible = Array.from(document.querySelectorAll('.mini-cart-container-content'))
         .find(el => el.getBoundingClientRect().width > 0);
@@ -3691,31 +4178,181 @@ function getCartItems() {
             const qtyInput = li.querySelector('input.js-miniCartQuantityField, input[class*="miniCartQuantity"]');
             const quantity = qtyInput ? Math.max(1, parseInt(qtyInput.value || '1', 10)) : 1;
 
-            items.push({ articleNumber, name, quantity });
+            items.push({
+                articleNumber,
+                name,
+                quantity,
+                url: getCartRowProductUrl(li, nameLink),
+                imageUrl: getCartRowImageUrl(li)
+            });
         });
         return items;
     }
 
     // Fallback: full cart page — scoped to visible container
     scope.querySelectorAll('.cart-ul li, tbody tr').forEach(row => {
-        const artEl = row.querySelector('[data-articlenumber], .js-article-number');
-        const articleNumber = artEl ? (artEl.dataset.articlenumber || artEl.textContent.replace(/[^0-9A-Za-z-]/g, '')) : '';
+        const artEl = row.querySelector('[data-articlenumber], .js-article-number, .js-article-number-only, .article-number-only, .lekolar-copy-btn[data-value]');
+        const articleNumber = artEl ? (artEl.dataset.articlenumber || artEl.dataset.value || artEl.textContent.replace(/[^0-9A-Za-z-]/g, '')) : '';
         if (!articleNumber) return;
 
-        const nameEl = row.querySelector('.item-name, .product-name, .js-lineItemClick');
+        const nameEl = row.querySelector('.item-name, .product-name, .js-lineItemClick, .js-checkoutlineItemClick');
         const name = nameEl ? (nameEl.getAttribute('title') || nameEl.textContent).trim() : '';
 
-        const qtyInput = row.querySelector('input[type="number"], input[type="text"]');
+        const qtyInput = row.querySelector('input.js-checkoutCartQuantityField, input[type="number"], input[type="text"]');
         const quantity = qtyInput ? Math.max(1, parseInt(qtyInput.value || '1', 10)) : 1;
 
-        items.push({ articleNumber, name, quantity });
+        items.push({
+            articleNumber,
+            name,
+            quantity,
+            url: getCartRowProductUrl(row, nameEl),
+            imageUrl: getCartRowImageUrl(row),
+            department: getCheckoutCartDepartment(row)
+        });
     });
 
     return items;
 }
 
-function exportCartToCsv() {
-    const items = getCartItems();
+function getCartArticleBaseNumber(articleNumber) {
+    const normalized = normalizeWhitespace(articleNumber || '');
+    const dashIndex = normalized.indexOf('-');
+    return dashIndex >= 0 ? normalized.slice(0, dashIndex) : normalized;
+}
+
+function createCartExportTimestamp() {
+    const date = new Date();
+    const datePart = [
+        date.getFullYear(),
+        String(date.getMonth() + 1).padStart(2, '0'),
+        String(date.getDate()).padStart(2, '0')
+    ].join('-');
+    const timePart = [
+        String(date.getHours()).padStart(2, '0'),
+        String(date.getMinutes()).padStart(2, '0'),
+        String(date.getSeconds()).padStart(2, '0')
+    ].join('-');
+    return `${datePart}_${timePart}`;
+}
+
+function createCartProductCardsFileName() {
+    return `Lekolar_Cart_Product_Cards_${createCartExportTimestamp()}.pptx`;
+}
+
+function createCartCsvFileName() {
+    return `Lekolar_Quotation_Cart_Import_${createCartExportTimestamp()}.csv`;
+}
+
+function isLekolarProductPageUrl(url) {
+    try {
+        const parsed = new URL(url, window.location.href);
+        return /\/(verkkokauppa|sortiment|webbutik)\//i.test(parsed.pathname);
+    } catch (_) {
+        return false;
+    }
+}
+
+async function findCartItemProductUrl(item) {
+    const identifiers = uniqueNonEmpty([
+        item.articleNumber,
+        getCartArticleBaseNumber(item.articleNumber)
+    ]);
+    const queries = uniqueNonEmpty([
+        item.articleNumber,
+        getCartArticleBaseNumber(item.articleNumber),
+        item.name
+    ]);
+
+    for (const query of queries) {
+        const searchBaseUrl = getProductNameSearchBaseUrl();
+        const searchUrl = (typeof buildLekolarSearchUrl === 'function')
+            ? buildLekolarSearchUrl(searchBaseUrl, query, {})
+            : `${searchBaseUrl}${searchBaseUrl.includes('?') ? '&' : '?'}query=${encodeURIComponent(query)}`;
+
+        try {
+            const searchDoc = await fetchHtmlDocument(searchUrl);
+            const fetchedUrl = normalizeWhitespace(searchDoc.__lesFetchedUrl || '');
+            if (isLekolarProductPageUrl(fetchedUrl)) return fetchedUrl;
+
+            const productUrl = findSearchResultProductUrl(searchDoc, identifiers);
+            if (productUrl) return productUrl;
+        } catch (error) {
+            console.warn('LES: Cart PPT product lookup failed for query:', query, error);
+        }
+    }
+
+    return '';
+}
+
+async function resolveCartItemProductData(item) {
+    let productUrl = buildProductCardVariantUrl(item.url || '', item.articleNumber || '');
+    if (!productUrl) {
+        productUrl = buildProductCardVariantUrl(await findCartItemProductUrl(item), item.articleNumber || '');
+    }
+
+    if (!productUrl) {
+        return createFallbackCartProductData(item, new Error('Product page URL not found'));
+    }
+
+    try {
+        const productDoc = await fetchHtmlDocument(productUrl);
+        return extractProductDataFromDoc(productDoc, productUrl, item);
+    } catch (error) {
+        console.warn('LES: Cart PPT could not load product page. Using cart row data.', productUrl, error);
+        return createFallbackCartProductData({ ...item, url: productUrl }, error);
+    }
+}
+
+async function buildCartProductCardProducts(items, onProgress) {
+    const products = [];
+    for (let index = 0; index < items.length; index++) {
+        if (typeof onProgress === 'function') onProgress(index, items.length, items[index]);
+        products.push(await resolveCartItemProductData(items[index]));
+    }
+    return products;
+}
+
+async function exportCartToPpt(button) {
+    const items = await enrichCartItemsWithCheckoutDepartments(getCartItems());
+    if (items.length === 0) {
+        showCompareToast('Cart is empty or items could not be parsed.');
+        return;
+    }
+
+    const originalText = button ? button.textContent : '';
+    const originalTitle = button ? button.title : '';
+    if (button) {
+        button.disabled = true;
+        button.textContent = `PPT 0/${items.length}`;
+        button.title = 'Generating cart PPT...';
+    }
+
+    try {
+        const products = await buildCartProductCardProducts(items, (index, total) => {
+            if (button) button.textContent = `PPT ${index + 1}/${total}`;
+        });
+        await generateCartProductCardsPptx(products, createCartProductCardsFileName());
+        showCompareToast(`Cart PPT downloaded with ${products.length} slides.`);
+    } catch (error) {
+        console.error('LES: Failed to create cart PPT:', error);
+        showCompareToast(getProductCardUserErrorMessage(error));
+    } finally {
+        if (button) {
+            button.disabled = false;
+            button.textContent = originalText || 'PPT';
+            button.title = originalTitle || 'Download cart as PPT';
+        }
+    }
+}
+
+function formatCartCsvCell(value) {
+    const text = String(value == null ? '' : value);
+    if (!/[;"\r\n]/.test(text)) return text;
+    return `"${text.replace(/"/g, '""')}"`;
+}
+
+async function exportCartToCsv() {
+    const items = await enrichCartItemsWithCheckoutDepartments(getCartItems());
     if (items.length === 0) {
         showCompareToast('Cart is empty or items could not be parsed.');
         return;
@@ -3744,13 +4381,13 @@ function exportCartToCsv() {
             existingProduct, // Existing Product
             artNoBase,       // Product number
             artNoConfig,     // Product configuration
-            '',              // Department
+            item.department || '', // Department
             String(item.quantity), // Quantity
             'Created',       // Sales Quotation Status
             'PCS',           // Unit
             ''               // Special Item name (empty for standard catalog products)
         ];
-        rows.push(row.join(';'));
+        rows.push(row.map(formatCartCsvCell).join(';'));
     });
     
     const csvContent = rows.join('\n');
@@ -3758,32 +4395,30 @@ function exportCartToCsv() {
     const dataUri = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csvContent);
     const a = document.createElement('a');
     a.href = dataUri;
-    a.setAttribute('download', 'Lekolar_Quotation_Cart_Import.csv');
+    a.setAttribute('download', createCartCsvFileName());
     a.style.cssText = 'position:fixed;top:-999px;left:-999px;';
     document.body.appendChild(a);
     a.click();
     setTimeout(() => document.body.removeChild(a), 500);
-    console.log('[LES] CSV export triggered with', items.length, 'items');
 }
 
 function initCartExportUi() {
+    const checkoutTable = document.querySelector('table.js-checkoutCartItems, table.cart-items');
     // Pick the VISIBLE .mini-cart-container-content — there are two in the DOM,
     // one is a 0×0 hidden duplicate. We want the one with real dimensions.
     const contentDiv = Array.from(document.querySelectorAll('.mini-cart-container-content'))
         .find(el => el.getBoundingClientRect().width > 0);
     const cartTable = document.querySelector('.cart-table');
 
-    const container = contentDiv || cartTable;
+    const container = checkoutTable || contentDiv || cartTable;
     if (!container) return;
 
     // Guard: don't inject twice
     if (container.querySelector('.les-cart-export-actions')) return;
 
     // Only inject when there are actually items in the cart
-    const hasItems = container.querySelector('li.js-miniCartItem, .cart-ul li, .cart-table tbody tr');
+    const hasItems = container.querySelector('li.js-miniCartItem, .cart-ul li, .cart-table tbody tr, table.js-checkoutCartItems tbody tr, tbody tr.js-checkoutCartItem, tbody tr.js-cartItem');
     if (!hasItems) return;
-
-    console.log('[LES] Injecting cart export buttons into', container.className);
 
     const actionRow = document.createElement('div');
     actionRow.className = 'les-cart-export-actions';
@@ -3801,7 +4436,11 @@ function initCartExportUi() {
         'height:auto !important',
         'overflow:visible !important',
         'visibility:visible !important',
-        'opacity:1 !important'
+        'opacity:1 !important',
+        'clear:both !important',
+        'float:none !important',
+        'position:relative !important',
+        'z-index:2 !important'
     ].join(';'));
 
     function makeExportBtn(label, clickHandler) {
@@ -3833,8 +4472,6 @@ function initCartExportUi() {
             'position:relative !important',
             'z-index:9999 !important'
         ].join(';'));
-        // Attach handler both ways to be safe
-        btn.onclick = clickHandler;
         btn.addEventListener('click', clickHandler);
         return btn;
     }
@@ -3842,24 +4479,64 @@ function initCartExportUi() {
     const pptBtn = makeExportBtn('PPT', (e) => {
         e.preventDefault();
         e.stopPropagation();
-        console.log('[LES] PPT button clicked');
-        alert('PPT export coming soon. Please use CSV for now.');
+        exportCartToPpt(pptBtn);
     });
 
     const csvBtn = makeExportBtn('CSV', (e) => {
         e.preventDefault();
         e.stopPropagation();
-        console.log('[LES] CSV button clicked');
         exportCartToCsv();
     });
 
     actionRow.appendChild(pptBtn);
     actionRow.appendChild(csvBtn);
 
-    if (contentDiv) {
+    if (checkoutTable) {
+        const exportRow = document.createElement('tr');
+        exportRow.className = 'les-cart-export-row print-view-hide';
+        const exportCell = document.createElement('td');
+        const firstItemRow = checkoutTable.querySelector('tbody tr');
+        exportCell.colSpan = firstItemRow && firstItemRow.children.length ? firstItemRow.children.length : 8;
+        exportCell.style.cssText = 'border:none !important;padding:0 !important;';
+        exportCell.appendChild(actionRow);
+        exportRow.appendChild(exportCell);
+
+        let tfoot = checkoutTable.querySelector('tfoot');
+        if (!tfoot) {
+            tfoot = document.createElement('tfoot');
+            checkoutTable.appendChild(tfoot);
+        }
+        const totalRow = tfoot.querySelector('.checkout-total-row') ? tfoot.querySelector('.checkout-total-row').closest('tr') : null;
+        if (totalRow) tfoot.insertBefore(exportRow, totalRow);
+        else tfoot.appendChild(exportRow);
+    } else if (contentDiv) {
         const kassalle = contentDiv.querySelector('a.button-submit');
         if (kassalle) {
-            contentDiv.insertBefore(actionRow, kassalle);
+            const miniCartExportWrap = document.createElement('div');
+            miniCartExportWrap.className = 'les-mini-cart-export-wrap';
+            miniCartExportWrap.setAttribute('style', [
+                'display:block !important',
+                'width:100% !important',
+                'box-sizing:border-box !important',
+                'clear:both !important',
+                'float:none !important',
+                'position:relative !important',
+                'z-index:2 !important',
+                'margin:8px 0 12px 0 !important',
+                'padding:0 !important',
+                'overflow:visible !important'
+            ].join(';'));
+            actionRow.style.setProperty('margin', '0', 'important');
+            actionRow.style.setProperty('clear', 'both', 'important');
+            actionRow.style.setProperty('float', 'none', 'important');
+            miniCartExportWrap.appendChild(actionRow);
+            kassalle.style.setProperty('display', 'block', 'important');
+            kassalle.style.setProperty('clear', 'both', 'important');
+            kassalle.style.setProperty('float', 'none', 'important');
+            kassalle.style.setProperty('position', 'relative', 'important');
+            kassalle.style.setProperty('z-index', '1', 'important');
+            kassalle.style.setProperty('margin-top', '8px', 'important');
+            contentDiv.insertBefore(miniCartExportWrap, kassalle);
         } else {
             contentDiv.appendChild(actionRow);
         }
@@ -3869,7 +4546,6 @@ function initCartExportUi() {
         else cartTable.parentElement.appendChild(actionRow);
     }
 
-    console.log('[LES] Cart export buttons injected. actionRow dims:', actionRow.getBoundingClientRect());
 }
 
 function closeCompareModal() {
@@ -3953,6 +4629,47 @@ function renderComparisonLoading(modal) {
     );
 }
 
+function getComparisonPriceView(item) {
+    const price = item && item.price;
+    if (!price || !price.display) return { display: '-', value: null, simulated: false };
+
+    const numericValue = Number(price.value);
+    const config = getPriceAdjustmentConfig();
+    if (config.active && Number.isFinite(numericValue) && numericValue > 0) {
+        const adjustedValue = numericValue * (1 + config.percent / 100);
+        const currencyMatch = String(price.display).match(/€|kr|SEK|NOK|DKK|EUR/i);
+        return {
+            display: formatComparePrice(adjustedValue, currencyMatch ? currencyMatch[0] : '€'),
+            value: adjustedValue,
+            simulated: true,
+            label: `sim ${formatPriceAdjustmentPercent(config.percent)}`,
+            color: config.color
+        };
+    }
+
+    return {
+        display: price.display,
+        value: Number.isFinite(numericValue) ? numericValue : null,
+        simulated: false
+    };
+}
+
+function getComparisonPriceExtremes(priceViews) {
+    const values = priceViews
+        .map((view, index) => ({ index, value: Number(view.value) }))
+        .filter(entry => Number.isFinite(entry.value) && entry.value > 0);
+    if (values.length < 2) return { cheapest: -1, expensive: -1 };
+
+    const min = Math.min(...values.map(entry => entry.value));
+    const max = Math.max(...values.map(entry => entry.value));
+    if (Math.abs(max - min) < 0.005) return { cheapest: -1, expensive: -1 };
+
+    return {
+        cheapest: values.find(entry => Math.abs(entry.value - min) < 0.005).index,
+        expensive: values.find(entry => Math.abs(entry.value - max) < 0.005).index
+    };
+}
+
 async function resolveComparisonItemDetails(item) {
     const cacheKey = item.url;
     if (comparisonDetailsCache.has(cacheKey)) {
@@ -3970,6 +4687,9 @@ function renderComparisonTable(modal, items) {
     const body = modal.querySelector('.les-compare-modal-body');
     if (!body) return;
     lesReplaceChildren(body);
+
+    const priceViews = items.map(getComparisonPriceView);
+    const priceExtremes = getComparisonPriceExtremes(priceViews);
 
     const grid = document.createElement('div');
     grid.className = 'les-compare-grid';
@@ -4027,7 +4747,7 @@ function renderComparisonTable(modal, items) {
         { label: 'Toxic-free', getValue: item => item.toxicFree },
         { label: 'Series', getValue: item => item.series },
         { label: 'Seat height', getValue: item => item.seatHeight },
-        { label: 'Description', getValue: item => item.shortDescription },
+        { label: 'Description', getValue: item => item.shortDescription, cellClass: 'les-compare-cell--description' },
         { label: 'Load status', getValue: item => item.loadError }
     ];
 
@@ -4042,10 +4762,46 @@ function renderComparisonTable(modal, items) {
 
         values.forEach(value => {
             const cell = document.createElement('div');
-            cell.className = 'les-compare-cell';
+            cell.className = 'les-compare-cell' + (row.cellClass ? ` ${row.cellClass}` : '');
             cell.textContent = value || '-';
             grid.appendChild(cell);
         });
+    });
+
+    const priceLabel = document.createElement('div');
+    priceLabel.className = 'les-compare-row-label les-compare-row-label--price';
+    priceLabel.textContent = 'Price';
+    grid.appendChild(priceLabel);
+
+    priceViews.forEach((priceView, index) => {
+        const cell = document.createElement('div');
+        cell.className = 'les-compare-cell les-compare-cell--price';
+        if (priceView.display === '-') {
+            cell.textContent = '-';
+            grid.appendChild(cell);
+            return;
+        }
+
+        const priceValue = document.createElement('span');
+        priceValue.className = 'les-compare-price-value';
+        priceValue.textContent = priceView.display;
+        if (priceView.simulated) {
+            priceValue.classList.add('les-price-adjusted');
+            priceValue.dataset.lesPriceAdjustmentLabel = priceView.label;
+            priceValue.style.setProperty('--les-price-adjustment-color', priceView.color);
+            priceValue.title = 'Simulated comparison price';
+        }
+        cell.appendChild(priceValue);
+
+        if (index === priceExtremes.cheapest || index === priceExtremes.expensive) {
+            const light = document.createElement('span');
+            const isCheapest = index === priceExtremes.cheapest;
+            light.className = `les-compare-price-light ${isCheapest ? 'is-cheapest' : 'is-expensive'}`;
+            light.title = isCheapest ? 'Cheapest product' : 'Most expensive product';
+            light.setAttribute('aria-label', light.title);
+            cell.appendChild(light);
+        }
+        grid.appendChild(cell);
     });
 
     body.appendChild(grid);
@@ -4120,6 +4876,74 @@ function extractProductDescriptionFromDoc(doc) {
     return '';
 }
 
+function formatComparePrice(price, currency) {
+    return `${price.toLocaleString('fi-FI', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${currency}`;
+}
+
+function extractPriceFromElement(root) {
+    if (!root) return null;
+    const selectors = '.price-buy-info .product-price, .price-buy-info .sales-price, .price-buy-info .price, .product-price, .sales-price, .price, .amount, [class*="price"]';
+    const elements = root.querySelectorAll ? root.querySelectorAll(selectors) : [];
+    for (const el of elements) {
+        if (el.closest && el.closest('.lekolar-sort-container, .les-card-actions, .les-buttons-bar, .filter, .facet, nav, header, footer, aside')) continue;
+        if (root === document && el.offsetParent === null && el.closest('.hidden')) continue;
+        const text = normalizeWhitespace(el.textContent || '');
+        if (!text || !/\d/.test(text)) continue;
+        if (!/(€|kr|SEK|NOK|DKK|EUR)/i.test(text)) continue;
+        const numberMatch = text.match(/\d[\d\s .]*[,.]?\d{0,2}/);
+        if (!numberMatch) continue;
+        const price = parseNordicPrice(numberMatch[0]);
+        if (price === null || price <= 0) continue;
+        const currencyMatch = text.match(/€|kr|SEK|NOK|DKK|EUR/i);
+        return { value: price, display: formatComparePrice(price, currencyMatch ? currencyMatch[0] : '€') };
+    }
+    return null;
+}
+
+function extractLiveProductPagePrice() {
+    const container = document.querySelector('.price-buy-info, .js-buyInfo, .product-info');
+    return extractPriceFromElement(container || document.body);
+}
+
+function extractCardDisplayPrice(card) {
+    const result = extractPriceFromElement(card);
+    if (result) return result;
+    const value = extractPriceFromCard(card);
+    if (value === null) return null;
+    return { value, display: formatComparePrice(value, '€') };
+}
+
+function extractProductPriceFromDoc(doc) {
+    const scopeSelectors = [
+        '.price-buy-info .product-price',
+        '.price-buy-info .sales-price',
+        '.price-buy-info .price-info',
+        '.price-buy-info .price',
+        '.js-buyInfo .product-price',
+        '.js-buyInfo .price',
+        '.product-info .price-buy-info',
+        '.price-buy-info'
+    ];
+
+    for (const selector of scopeSelectors) {
+        const elements = doc.querySelectorAll(selector);
+        for (const el of elements) {
+            if (el.closest('.lekolar-sort-container, .les-card-actions, .les-buttons-bar, .filter, .facet, nav, header, footer, aside')) continue;
+            const text = normalizeWhitespace(el.textContent || '');
+            if (!text || !/\d/.test(text)) continue;
+            if (!/(€|kr|SEK|NOK|DKK|EUR)/i.test(text)) continue;
+            const numberMatch = text.match(/\d[\d\s .]*[,.]?\d{0,2}/);
+            if (!numberMatch) continue;
+            const price = parseNordicPrice(numberMatch[0]);
+            if (price === null || price <= 0) continue;
+            const currencyMatch = text.match(/€|kr|SEK|NOK|DKK|EUR/i);
+            const currency = currencyMatch ? currencyMatch[0] : '€';
+            return { value: price, display: `${price.toLocaleString('fi-FI', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${currency}` };
+        }
+    }
+    return null;
+}
+
 function extractProductNameFromDoc(doc) {
     const h1 = doc.querySelector('.product-info h1, .product-page-wrapper h1, .product-page h1, h1');
     if (h1) {
@@ -4133,10 +4957,25 @@ function extractProductNameFromDoc(doc) {
     return ogTitle && ogTitle.content ? normalizeWhitespace(ogTitle.content) : '';
 }
 
-function extractProductImageFromDoc(doc, baseUrl) {
+function findProductImageLinkForArticle(doc, articleNumber) {
+    const normalizedArticle = normalizeWhitespace(articleNumber || '');
+    if (!doc || !normalizedArticle) return null;
+
+    const candidates = doc.querySelectorAll('.product-image-wrapper .js-productImage[data-articlenr], .product-image-wrapper [data-articlenr]');
+    for (const candidate of candidates) {
+        if (normalizeWhitespace(candidate.getAttribute('data-articlenr') || '') === normalizedArticle) {
+            return candidate;
+        }
+    }
+
+    return null;
+}
+
+function extractProductImageFromDoc(doc, baseUrl, articleNumber = '') {
     if (doc === document) return getMainProductImageUrl();
 
-    const imageLink = doc.querySelector('.product-image-wrapper .js-currentImage, .product-image-wrapper .current-image, .product-image-wrapper .js-productImage');
+    const variantImageLink = findProductImageLinkForArticle(doc, articleNumber);
+    const imageLink = variantImageLink || doc.querySelector('.product-image-wrapper .js-currentImage, .product-image-wrapper .current-image, .product-image-wrapper .js-productImage');
     const href = imageLink ? imageLink.getAttribute('href') : '';
     if (href) return new URL(href, baseUrl).href;
 
@@ -4196,6 +5035,7 @@ function buildCompareMetaFromDoc(doc, url, fallback = {}) {
         toxicFree: isToxicFree ? 'Yes' : '',
         series: getComparisonPropertyValue(properties, ['tuoteperhe', 'sarja', 'product series', 'produktserie', 'serie']) || inferSeriesFromProductUrl(url),
         seatHeight: getComparisonPropertyValue(properties, ['istuinkorkeus', 'seat height', 'sitthojd', 'sittehoyde', 'siddehojde', 'saedehojde']),
+        price: (fallback && fallback.price) || (doc === document ? extractLiveProductPagePrice() : null) || extractProductPriceFromDoc(doc) || null,
         productProperties: properties,
         source: 'product-page',
         loadError: '',
@@ -6247,7 +7087,7 @@ function writeAdjustedPriceText(element, originalText, adjustedText, percent) {
 
 function isPriceAdjustmentCandidate(element) {
     if (!element || element.nodeType !== 1) return false;
-    if (element.closest('.lekolar-sort-container, .les-card-actions, .les-buttons-bar')) return false;
+    if (element.closest('.lekolar-sort-container, .les-card-actions, .les-buttons-bar, .les-compare-modal')) return false;
     if (element.closest('button, input, select, textarea')) return false;
     if (element.matches('.price-buy-info, .buy-info, .js-buyInfo')) return false;
 
@@ -7181,6 +8021,172 @@ async function loadSettingsAndInit() {
     initAll();
 }
 
+// --- Variant hints --------------------------------------------------------
+// Lekolar product pages only render the *next* variant dropdown after the
+// previous one has been chosen (e.g. "Korkeus" only appears after "Väri"
+// is picked). The page's own VariantUtil knows about every dropdown up
+// front. We inject a bridge into the page world that mirrors the full
+// dropdown list to a dataset attribute on <html>, and from the content
+// script we add greyed-out placeholders for any dropdowns that aren't
+// rendered yet.
+
+let lesVariantBridgeInstalled = false;
+let lesVariantHintsObserver = null;
+
+function lesInstallVariantBridge() {
+    if (lesVariantBridgeInstalled) return;
+    if (!document.documentElement) return;
+    lesVariantBridgeInstalled = true;
+    const script = document.createElement('script');
+    script.textContent = `(function(){
+        function write() {
+            try {
+                var vu = window.productPage && window.productPage.variantUtil;
+                var dd = vu && vu._dropdowns;
+                if (Array.isArray(dd)) {
+                    document.documentElement.dataset.lesDropdowns = JSON.stringify(dd);
+                    document.documentElement.dispatchEvent(new CustomEvent('les-variant-bridge-update'));
+                }
+            } catch (e) {}
+        }
+        function hook() {
+            try {
+                if (!window.productPage || window.__lesVariantBridgeHooked) return false;
+                window.__lesVariantBridgeHooked = true;
+                var origInit = window.productPage.initVariants;
+                if (typeof origInit === 'function') {
+                    window.productPage.initVariants = function() {
+                        var r = origInit.apply(this, arguments);
+                        write();
+                        return r;
+                    };
+                }
+                var origUpdate = window.productPage.updateVariant;
+                if (typeof origUpdate === 'function') {
+                    window.productPage.updateVariant = function() {
+                        var r = origUpdate.apply(this, arguments);
+                        write();
+                        return r;
+                    };
+                }
+                write();
+                return true;
+            } catch (e) { return false; }
+        }
+        if (!hook()) {
+            var tries = 0;
+            var iv = setInterval(function(){
+                if (hook() || ++tries > 40) clearInterval(iv);
+            }, 250);
+        }
+    })();`;
+    (document.head || document.documentElement).appendChild(script);
+    script.remove();
+    document.documentElement.addEventListener('les-variant-bridge-update', () => {
+        if (!lesContentDisabled() && currentSettings.variantHints !== false) {
+            renderVariantHints();
+        }
+    });
+}
+
+function readVariantDropdowns() {
+    try {
+        const raw = document.documentElement && document.documentElement.dataset
+            ? document.documentElement.dataset.lesDropdowns
+            : '';
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed : null;
+    } catch (e) { return null; }
+}
+
+function formatVariantHintOptions(options) {
+    if (!Array.isArray(options) || options.length === 0) return '';
+    const visibleOptions = options
+        .slice(0, 2)
+        .map(option => String(option || '').trim())
+        .filter(Boolean);
+    if (visibleOptions.length === 0) return '';
+    const remainingCount = Math.max(0, options.length - visibleOptions.length);
+    return remainingCount > 0
+        ? `${visibleOptions.join(' · ')} · +${remainingCount}`
+        : visibleOptions.join(' · ');
+}
+
+function renderVariantHints() {
+    const container = document.querySelector('.product-variants.jsProductVariants');
+    if (!container) return;
+    const dropdowns = readVariantDropdowns();
+    if (!dropdowns || dropdowns.length === 0) {
+        container.querySelectorAll('.les-variant-hint').forEach(n => n.remove());
+        return;
+    }
+    const rendered = new Set();
+    container.querySelectorAll('select').forEach(sel => {
+        const first = sel.options && sel.options[0];
+        if (first && first.value === '' && first.textContent) {
+            rendered.add(first.textContent.trim());
+        }
+    });
+    const existingHintLabels = new Set();
+    container.querySelectorAll('.les-variant-hint').forEach(hint => {
+        const label = hint.dataset.lesHintLabel;
+        if (rendered.has(label)) {
+            hint.remove();
+        } else {
+            existingHintLabels.add(label);
+        }
+    });
+    dropdowns.forEach(dd => {
+        if (!dd || typeof dd.Label !== 'string') return;
+        const label = dd.Label.trim();
+        if (!label || rendered.has(label) || existingHintLabels.has(label)) return;
+        const options = Array.isArray(dd.Options) ? dd.Options : [];
+        const hint = document.createElement('div');
+        hint.className = 'les-variant-hint';
+        hint.dataset.lesHintLabel = label;
+        hint.title = 'Valitse edellinen vaihtoehto avataksesi tämän';
+
+        const fake = document.createElement('div');
+        fake.className = 'les-variant-hint-dropdown';
+        const labelSpan = document.createElement('span');
+        labelSpan.className = 'les-variant-hint-label';
+        labelSpan.textContent = label;
+        const optsSpan = document.createElement('span');
+        optsSpan.className = 'les-variant-hint-options';
+        optsSpan.textContent = formatVariantHintOptions(options);
+        const lock = document.createElement('span');
+        lock.className = 'les-variant-hint-lock';
+        lock.textContent = '🔒';
+        lock.setAttribute('aria-hidden', 'true');
+        fake.appendChild(lock);
+        fake.appendChild(labelSpan);
+        if (optsSpan.textContent) fake.appendChild(optsSpan);
+        hint.appendChild(fake);
+        container.appendChild(hint);
+    });
+}
+
+function initVariantHints() {
+    if (lesContentDisabled() || currentSettings.variantHints === false) {
+        document.querySelectorAll('.les-variant-hint').forEach(n => n.remove());
+        if (lesVariantHintsObserver) {
+            lesVariantHintsObserver.disconnect();
+            lesVariantHintsObserver = null;
+        }
+        return;
+    }
+    const container = document.querySelector('.product-variants.jsProductVariants');
+    if (!container) return;
+    lesInstallVariantBridge();
+    renderVariantHints();
+    if (lesVariantHintsObserver) lesVariantHintsObserver.disconnect();
+    lesVariantHintsObserver = new MutationObserver(() => {
+        renderVariantHints();
+    });
+    lesVariantHintsObserver.observe(container, { childList: true, subtree: true });
+}
+
 // Initialize
 function initAll() {
     if (lesContentDisabled()) {
@@ -7207,6 +8213,7 @@ function initAll() {
     initProductComparisonUi();
     initCartExportUi();
     initProductNotesUi();
+    initVariantHints();
     applyPriceAdjustments();
     if (currentSettings.infiniteScroll) {
         initSearchConsolidation();
@@ -7286,6 +8293,7 @@ const pageObserver = new MutationObserver((mutations) => {
             initProductComparisonUi();
             initCartExportUi();
             initProductNotesUi();
+            initVariantHints();
             applyPriceAdjustments();
             if (currentSettings.copyButtons) {
                 findAndInject();

@@ -52,6 +52,20 @@
       "background.js"
     ]
   },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "assets/lekolar-logo.svg",
+        "assets/lekolar-logo.jpeg"
+      ],
+      "matches": [
+        "*://*.lekolar.fi/*",
+        "*://*.lekolar.se/*",
+        "*://*.lekolar.no/*",
+        "*://*.lekolar.dk/*"
+      ]
+    }
+  ],
   "omnibox": {
     "keyword": "l"
   },

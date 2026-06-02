@@ -39,6 +39,14 @@
       </button>
       <div class="power-label" id="powerLabel">Enabled</div>
       <div class="power-hint" id="powerHint">Click to disable on all Lekolar sites</div>
+      <button id="refreshPageBtn" class="refresh-page-btn hidden" type="button" aria-label="Refresh current page to apply addon state" title="Refresh page to show the new addon state">
+        <svg viewBox="0 0 24 24" class="refresh-icon" aria-hidden="true">
+          <path d="M20 11a8 8 0 0 0-14.4-4.8L4 8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M4 4v4h4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M4 13a8 8 0 0 0 14.4 4.8L20 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M20 20v-4h-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </button>
     </div>
 
     <div id="permissionWarning" class="permission-warning hidden">
@@ -47,18 +55,41 @@
 
     <div id="priceSimulationStatus" class="price-simulation-status hidden" role="status" aria-live="polite"></div>
 
-    <!-- SharePoint entitlement (kept on popup — quick at-a-glance check) -->
-    <div class="section compact-section">
-      <div class="section-row">
-        <span class="section-row-label">Extended features</span>
-        <button id="recheckEntitlementBtn" class="primary-btn secondary-btn compact-btn" type="button">Re-check</button>
+    <!-- SharePoint entitlement (kept on popup: quick at-a-glance check) -->
+    <div class="section compact-section sharepoint-section">
+      <div class="section-row sharepoint-row">
+        <span class="section-row-label">SharePoint</span>
+        <button id="recheckEntitlementBtn" class="icon-btn sharepoint-check-btn" type="button" aria-label="Check SharePoint connection" title="Check SharePoint connection">
+          <svg viewBox="0 0 24 24" class="action-icon" aria-hidden="true">
+            <path d="M20 11a8 8 0 0 0-13.6-5.7L5 6.7" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M5 3v3.7h3.7" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M4 13a8 8 0 0 0 13.6 5.7L19 17.3" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M19 21v-3.7h-3.7" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
       </div>
       <p id="entitlementStatus" class="hint status-line">Status: Unknown</p>
     </div>
 
+    <div class="section nerd-section">
+      <div class="section-row">
+        <span class="section-row-label">Stats for nerds</span>
+      </div>
+      <div class="nerd-grid" id="nerdStats">
+        <div><span id="statHost">-</span><small>host</small></div>
+        <div><span id="statEnabledFeatures">-</span><small>features on</small></div>
+        <div><span id="statSharePointAge">-</span><small>SP check</small></div>
+      </div>
+    </div>
+
     <!-- Open full settings -->
-    <div class="section compact-section">
-      <button id="openSettingsBtn" class="primary-btn full-btn" type="button">⚙ Open settings</button>
+    <div class="footer-actions">
+      <button id="openSettingsBtn" class="icon-btn settings-btn" type="button" aria-label="Open settings" title="Open settings">
+        <svg viewBox="0 0 24 24" class="action-icon" aria-hidden="true">
+          <path d="M12 15.5A3.5 3.5 0 1 0 12 8a3.5 3.5 0 0 0 0 7.5Z" fill="none" stroke="currentColor" stroke-width="1.8"/>
+          <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 0 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6V21a2 2 0 0 1-4 0v-.1a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1A2 2 0 0 1 4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.6-1H3a2 2 0 0 1 0-4h.1a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.3 7A2 2 0 0 1 7 4.2l.1.1a1.7 1.7 0 0 0 1.9.3 1.7 1.7 0 0 0 1-1.6V3a2 2 0 0 1 4 0v.1a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1A2 2 0 0 1 19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.1a2 2 0 0 1 0 4H21a1.7 1.7 0 0 0-1.6 1Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+        </svg>
+      </button>
     </div>
   </div>
 

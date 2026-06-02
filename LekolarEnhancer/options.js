@@ -256,6 +256,7 @@ function lesPaintGeneral() {
     document.getElementById('copyButtons').checked = !!lesSettings.copyButtons;
     document.getElementById('hideEnvironmentalLogo').checked = !!lesSettings.hideEnvironmentalLogo;
     document.getElementById('productLayoutDivider').checked = lesSettings.productLayoutDivider !== false;
+    document.getElementById('variantHints').checked = lesSettings.variantHints !== false;
     document.getElementById('priceAdjustmentEnabled').checked = !!lesSettings.priceAdjustmentEnabled;
     document.getElementById('priceAdjustmentPercent').value = lesNormalizePriceAdjustmentPercent(lesSettings.priceAdjustmentPercent);
     document.getElementById('priceAdjustmentHighlightColor').value = lesNormalizePriceAdjustmentColor(lesSettings.priceAdjustmentHighlightColor);
@@ -284,6 +285,7 @@ function lesWireGeneral() {
     wireToggle('copyButtons', 'copyButtons');
     wireToggle('hideEnvironmentalLogo', 'hideEnvironmentalLogo');
     wireToggle('productLayoutDivider', 'productLayoutDivider');
+    wireToggle('variantHints', 'variantHints');
     wireToggle('debugLogging', 'debugLogging');
 
     document.getElementById('priceAdjustmentEnabled').addEventListener('change', (e) => {
@@ -555,11 +557,22 @@ function lesEnsureProductCardPptSettings() {
     const needsNormalize = !settings ||
         typeof settings !== 'object' ||
         !settings.labels ||
+        !settings.labels.department ||
+        typeof settings.showDepartment !== 'boolean' ||
         !settings.linkFormat ||
         !Array.isArray(settings.linkFormat.tokens) ||
-        !/^#[0-9a-f]{6}$/i.test(String(settings.bannerColor || ''));
+        !/^#[0-9a-f]{6}$/i.test(String(settings.bannerColor || '')) ||
+        !settings.template ||
+        !settings.template.blocks ||
+        !settings.template.blocks.title ||
+        !settings.template.blocks.department ||
+        settings.template.unit !== 'cm';
     if (needsNormalize) {
         lesSettings.productCardPpt = lesCloneProductCardPptSettings(settings);
+        // Persist migrated settings so the upgrade sticks on next load.
+        if (typeof lesStorageSet === 'function') {
+            lesStorageSet({ productCardPpt: lesSettings.productCardPpt });
+        }
     }
     return lesSettings.productCardPpt;
 }
@@ -576,8 +589,391 @@ function lesPaintProductCardPpt() {
     document.getElementById('productCardPptItemLabel').value = settings.labels.item;
     document.getElementById('productCardPptDescriptionLabel').value = settings.labels.description;
     document.getElementById('productCardPptSpecificationsLabel').value = settings.labels.specifications;
+    document.getElementById('productCardPptDepartmentLabel').value = settings.labels.department;
+    document.getElementById('productCardPptShowDepartment').checked = settings.showDepartment !== false;
+    lesPaintProductCardLayout();
     lesRenderProductCardLinkTokens();
     lesRenderProductCardLinkPreview();
+}
+
+const LES_PRODUCT_CARD_BLOCK_LABELS = {
+    title:      'Title',
+    sku:        'Item number',
+    image:      'Image frame',
+    descLabel:  'Description label',
+    desc:       'Description text',
+    specsLabel: 'Specifications label',
+    specs:      'Specifications text',
+    link:       'URL link',
+    departmentLabel: 'Department label',
+    department: 'Department value'
+};
+
+function lesEnsureProductCardTemplate() {
+    const settings = lesEnsureProductCardPptSettings();
+    if (!settings.template || typeof settings.template !== 'object') {
+        settings.template = typeof lesCloneProductCardPptTemplate === 'function'
+            ? lesCloneProductCardPptTemplate(null)
+            : JSON.parse(JSON.stringify(LES_DEFAULT_PRODUCT_CARD_PPT_TEMPLATE));
+    }
+    return settings.template;
+}
+
+function lesPaintProductCardLayout() {
+    const tpl = lesEnsureProductCardTemplate();
+    const bg = lesNormalizeHexColor(tpl.background, '#FFFFFF');
+    document.getElementById('productCardPptBackground').value = bg;
+    document.getElementById('productCardPptBackgroundHex').value = bg;
+    document.getElementById('productCardPptBannerH').value = String(tpl.banner.h);
+    lesRenderProductCardLayoutPreview();
+
+    const container = document.getElementById('productCardPptLayoutFields');
+    lesReplaceChildren(container);
+
+    const header = document.createElement('div');
+    header.className = 'layout-row is-header';
+    ['Block', 'X (cm)', 'Y (cm)', 'W (cm)', 'H (cm)', 'Font (pt) / Pad (cm)'].forEach(text => {
+        const cell = document.createElement('div');
+        cell.textContent = text;
+        header.appendChild(cell);
+    });
+    container.appendChild(header);
+
+    LES_PRODUCT_CARD_PPT_TEMPLATE_BLOCKS.forEach(key => {
+        const block = tpl.blocks[key];
+        const row = document.createElement('div');
+        row.className = 'layout-row';
+        row.dataset.block = key;
+
+        const labelCell = document.createElement('div');
+        labelCell.className = 'layout-block-label';
+        labelCell.textContent = LES_PRODUCT_CARD_BLOCK_LABELS[key] || key;
+        row.appendChild(labelCell);
+
+        ['x', 'y', 'w', 'h'].forEach(field => {
+            const input = document.createElement('input');
+            input.type = 'number';
+            input.step = '0.1';
+            input.min = '0';
+            input.max = field === 'x' || field === 'w' ? String(LES_PRODUCT_CARD_SLIDE_W) : String(LES_PRODUCT_CARD_SLIDE_H);
+            input.value = String(block[field]);
+            input.dataset.field = field;
+            row.appendChild(input);
+        });
+
+        const extra = document.createElement('input');
+        extra.type = 'number';
+        if (key === 'image') {
+            extra.step = '0.05';
+            extra.min = '0';
+            extra.max = '5';
+            extra.value = String(block.pad != null ? block.pad : 0.25);
+            extra.dataset.field = 'pad';
+            extra.title = 'Padding between image frame and picture (cm)';
+        } else {
+            extra.step = '0.5';
+            extra.min = '4';
+            extra.max = '96';
+            extra.value = String(block.fontSize != null ? block.fontSize : 12);
+            extra.dataset.field = 'fontSize';
+            extra.title = 'Font size (pt)';
+        }
+        row.appendChild(extra);
+        container.appendChild(row);
+    });
+}
+
+const LES_PX_PER_CM = 96 / 2.54; // CSS spec: 1in = 96px; 1in = 2.54cm.
+const LES_LAYOUT_SNAP_GRID_CM = 0.25;
+const LES_LAYOUT_SNAP_TOLERANCE_CM = 0.2;
+
+function lesApplyLayoutPreviewScale() {
+    const frame = document.querySelector('.layout-preview-frame');
+    const stage = document.getElementById('productCardPptLayoutPreview');
+    if (!frame || !stage) return;
+    const w = frame.clientWidth;
+    if (!w) return;
+    const scale = w / (LES_PRODUCT_CARD_SLIDE_W * LES_PX_PER_CM);
+    stage.style.transform = 'scale(' + scale + ')';
+}
+
+let lesLayoutResizeObserver = null;
+function lesAttachLayoutPreviewResizing() {
+    const frame = document.querySelector('.layout-preview-frame');
+    if (!frame || frame.dataset.resizeWired === '1') return;
+    frame.dataset.resizeWired = '1';
+    lesApplyLayoutPreviewScale();
+    if (typeof ResizeObserver !== 'undefined') {
+        lesLayoutResizeObserver = new ResizeObserver(() => lesApplyLayoutPreviewScale());
+        lesLayoutResizeObserver.observe(frame);
+    } else {
+        window.addEventListener('resize', lesApplyLayoutPreviewScale);
+    }
+}
+
+function lesRenderProductCardLayoutPreview() {
+    const stage = document.getElementById('productCardPptLayoutPreview');
+    if (!stage) return;
+    const settings = lesEnsureProductCardPptSettings();
+    const tpl = settings.template;
+    const accent = lesNormalizeHexColor(settings.bannerColor, '#B5121B');
+    const bg = lesNormalizeHexColor(tpl.background, '#FFFFFF');
+    stage.style.background = bg;
+    lesReplaceChildren(stage);
+
+    const sampleSku = (settings.labels.item || 'Item') + ' 123456';
+    const sampleDesc = 'Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore.';
+    const sampleSpecs = '- Width: 120 cm\n- Height: 75 cm\n- Material: koivuvaneri\n- Color: white';
+    const sampleLink = 'https://www.lekolar.fi/p/123456';
+    const sampleDepartment = '123';
+
+    const placeBlock = (el, b, extraCls) => {
+        el.classList.add('block');
+        if (extraCls) extraCls.split(' ').forEach(c => c && el.classList.add(c));
+        el.style.left = b.x + 'cm';
+        el.style.top = b.y + 'cm';
+        el.style.width = b.w + 'cm';
+        el.style.height = b.h + 'cm';
+        if (b.fontSize) el.style.fontSize = b.fontSize + 'pt';
+        if (el.dataset.block) {
+            const handle = document.createElement('div');
+            handle.className = 'resize-handle';
+            el.appendChild(handle);
+        }
+        stage.appendChild(el);
+        return el;
+    };
+
+    const banner = document.createElement('div');
+    banner.className = 'block block-banner-bg';
+    banner.style.height = tpl.banner.h + 'cm';
+    banner.style.background = accent;
+    stage.appendChild(banner);
+
+    const blocks = tpl.blocks;
+    const titleEl = document.createElement('div');
+    titleEl.textContent = 'Sample product title';
+    titleEl.dataset.block = 'title';
+    placeBlock(titleEl, blocks.title, 'block-title');
+
+    const skuEl = document.createElement('div');
+    skuEl.textContent = sampleSku;
+    skuEl.dataset.block = 'sku';
+    placeBlock(skuEl, blocks.sku, 'block-sku');
+
+    const imageEl = document.createElement('div');
+    imageEl.textContent = 'No product image';
+    imageEl.dataset.block = 'image';
+    placeBlock(imageEl, blocks.image, 'block-image-frame');
+
+    const dLabelEl = document.createElement('div');
+    dLabelEl.textContent = settings.labels.description || 'Description';
+    dLabelEl.dataset.block = 'descLabel';
+    dLabelEl.style.color = accent;
+    placeBlock(dLabelEl, blocks.descLabel, 'block-label');
+
+    const dTextEl = document.createElement('div');
+    dTextEl.textContent = sampleDesc;
+    dTextEl.dataset.block = 'desc';
+    placeBlock(dTextEl, blocks.desc, 'block-text');
+
+    const sLabelEl = document.createElement('div');
+    sLabelEl.textContent = settings.labels.specifications || 'Specifications';
+    sLabelEl.dataset.block = 'specsLabel';
+    sLabelEl.style.color = accent;
+    placeBlock(sLabelEl, blocks.specsLabel, 'block-label');
+
+    const sTextEl = document.createElement('div');
+    sTextEl.textContent = sampleSpecs;
+    sTextEl.style.whiteSpace = 'pre-line';
+    sTextEl.dataset.block = 'specs';
+    placeBlock(sTextEl, blocks.specs, 'block-text');
+
+    const linkEl = document.createElement('div');
+    linkEl.textContent = sampleLink;
+    linkEl.dataset.block = 'link';
+    placeBlock(linkEl, blocks.link, 'block-link');
+
+    if (settings.showDepartment !== false && blocks.departmentLabel && blocks.department) {
+        const deptLabelEl = document.createElement('div');
+        deptLabelEl.textContent = settings.labels.department || 'Department';
+        deptLabelEl.dataset.block = 'departmentLabel';
+        deptLabelEl.style.color = accent;
+        placeBlock(deptLabelEl, blocks.departmentLabel, 'block-label');
+
+        const deptEl = document.createElement('div');
+        deptEl.textContent = sampleDepartment;
+        deptEl.dataset.block = 'department';
+        placeBlock(deptEl, blocks.department, 'block-text');
+    }
+
+    const footer = tpl.footer || {};
+    if (footer.lekolarLogo) {
+        const lekEl = document.createElement('img');
+        lekEl.src = chrome.runtime.getURL('assets/lekolar-logo.svg');
+        lekEl.alt = 'Lekolar';
+        lekEl.draggable = false;
+        lekEl.className = 'block block-footer-placeholder';
+        lekEl.style.left = (footer.lekolarLogo.rightX - footer.lekolarLogo.w) + 'cm';
+        lekEl.style.top = footer.lekolarLogo.y + 'cm';
+        lekEl.style.width = footer.lekolarLogo.w + 'cm';
+        lekEl.style.height = footer.lekolarLogo.h + 'cm';
+        lekEl.style.objectFit = 'contain';
+        lekEl.style.border = '0';
+        lekEl.style.background = 'transparent';
+        stage.appendChild(lekEl);
+    }
+    if (footer.envLogos) {
+        const envEl = document.createElement('div');
+        envEl.textContent = 'Env logos';
+        envEl.className = 'block block-footer-placeholder';
+        envEl.style.left = footer.envLogos.startX + 'cm';
+        envEl.style.top = footer.envLogos.y + 'cm';
+        envEl.style.width = (footer.envLogos.maxRight - footer.envLogos.startX) + 'cm';
+        envEl.style.height = footer.envLogos.h + 'cm';
+        stage.appendChild(envEl);
+    }
+
+    lesApplyLayoutPreviewScale();
+}
+
+// Collect snap targets (vertical line positions for X-snap, horizontal for Y-snap)
+// from slide edges, slide center, banner edge, and every other block's edges & center.
+function lesGetLayoutSnapGuides(activeKey) {
+    const tpl = lesEnsureProductCardTemplate();
+    const slideW = LES_PRODUCT_CARD_SLIDE_W;
+    const slideH = LES_PRODUCT_CARD_SLIDE_H;
+    const v = new Set([0, slideW, slideW / 2]);
+    const h = new Set([0, slideH, slideH / 2, tpl.banner.h]);
+    for (const k of LES_PRODUCT_CARD_PPT_TEMPLATE_BLOCKS) {
+        if (k === activeKey) continue;
+        const b = tpl.blocks[k];
+        v.add(b.x);
+        v.add(b.x + b.w);
+        v.add(b.x + b.w / 2);
+        h.add(b.y);
+        h.add(b.y + b.h);
+        h.add(b.y + b.h / 2);
+    }
+    return { v: Array.from(v), h: Array.from(h) };
+}
+
+function lesClearSnapGuides(stage) {
+    stage.querySelectorAll('.snap-guide').forEach(g => g.remove());
+}
+
+function lesShowSnapGuide(stage, orient, posCm) {
+    const g = document.createElement('div');
+    g.className = 'snap-guide snap-guide-' + orient;
+    if (orient === 'v') g.style.left = posCm + 'cm';
+    else g.style.top = posCm + 'cm';
+    stage.appendChild(g);
+}
+
+// Snap an X position for drag mode. Tries three edges (left, right, center)
+// against vertical guides; falls back to coarse grid.
+function lesSnapDragX(rawX, w, guides, stage) {
+    const candidates = [
+        { v: rawX,           kind: 'left'   },
+        { v: rawX + w,       kind: 'right'  },
+        { v: rawX + w / 2,   kind: 'center' }
+    ];
+    let best = null;
+    for (const c of candidates) {
+        for (const g of guides) {
+            const d = Math.abs(c.v - g);
+            if (d < LES_LAYOUT_SNAP_TOLERANCE_CM && (!best || d < best.d)) {
+                best = { d, edge: c.v, guide: g };
+            }
+        }
+    }
+    if (best) {
+        lesShowSnapGuide(stage, 'v', best.guide);
+        return rawX + (best.guide - best.edge);
+    }
+    return Math.round(rawX / LES_LAYOUT_SNAP_GRID_CM) * LES_LAYOUT_SNAP_GRID_CM;
+}
+
+function lesSnapDragY(rawY, h, guides, stage) {
+    const candidates = [
+        { v: rawY,           kind: 'top'    },
+        { v: rawY + h,       kind: 'bottom' },
+        { v: rawY + h / 2,   kind: 'middle' }
+    ];
+    let best = null;
+    for (const c of candidates) {
+        for (const g of guides) {
+            const d = Math.abs(c.v - g);
+            if (d < LES_LAYOUT_SNAP_TOLERANCE_CM && (!best || d < best.d)) {
+                best = { d, edge: c.v, guide: g };
+            }
+        }
+    }
+    if (best) {
+        lesShowSnapGuide(stage, 'h', best.guide);
+        return rawY + (best.guide - best.edge);
+    }
+    return Math.round(rawY / LES_LAYOUT_SNAP_GRID_CM) * LES_LAYOUT_SNAP_GRID_CM;
+}
+
+// For resize, only the right/bottom edge moves; snap that edge to nearest guide.
+function lesSnapResizeW(x, rawW, guides, stage) {
+    const right = x + rawW;
+    let best = null;
+    for (const g of guides) {
+        const d = Math.abs(right - g);
+        if (d < LES_LAYOUT_SNAP_TOLERANCE_CM && (!best || d < best.d)) best = { d, guide: g };
+    }
+    if (best) {
+        lesShowSnapGuide(stage, 'v', best.guide);
+        return best.guide - x;
+    }
+    return Math.round(rawW / LES_LAYOUT_SNAP_GRID_CM) * LES_LAYOUT_SNAP_GRID_CM;
+}
+
+function lesSnapResizeH(y, rawH, guides, stage) {
+    const bottom = y + rawH;
+    let best = null;
+    for (const g of guides) {
+        const d = Math.abs(bottom - g);
+        if (d < LES_LAYOUT_SNAP_TOLERANCE_CM && (!best || d < best.d)) best = { d, guide: g };
+    }
+    if (best) {
+        lesShowSnapGuide(stage, 'h', best.guide);
+        return best.guide - y;
+    }
+    return Math.round(rawH / LES_LAYOUT_SNAP_GRID_CM) * LES_LAYOUT_SNAP_GRID_CM;
+}
+
+function lesHighlightPreviewBlock(blockKey) {
+    const stage = document.getElementById('productCardPptLayoutPreview');
+    if (!stage) return;
+    stage.querySelectorAll('.block.is-focused').forEach(el => el.classList.remove('is-focused'));
+    if (!blockKey) return;
+    const target = stage.querySelector('[data-block="' + blockKey + '"]');
+    if (target) target.classList.add('is-focused');
+}
+
+function lesUpdateBlockField(blockKey, field, rawValue, inputEl) {
+    const tpl = lesEnsureProductCardTemplate();
+    const block = tpl.blocks[blockKey];
+    if (!block) return;
+    const numeric = parseFloat(rawValue);
+    if (!isFinite(numeric)) {
+        if (inputEl) inputEl.classList.add('is-invalid');
+        return;
+    }
+    if (inputEl) inputEl.classList.remove('is-invalid');
+    let clamped = numeric;
+    if (field === 'x') clamped = Math.max(0, Math.min(LES_PRODUCT_CARD_SLIDE_W, numeric));
+    else if (field === 'y') clamped = Math.max(0, Math.min(LES_PRODUCT_CARD_SLIDE_H, numeric));
+    else if (field === 'w') clamped = Math.max(0.2, Math.min(LES_PRODUCT_CARD_SLIDE_W, numeric));
+    else if (field === 'h') clamped = Math.max(0.2, Math.min(LES_PRODUCT_CARD_SLIDE_H, numeric));
+    else if (field === 'fontSize') clamped = Math.max(4, Math.min(96, numeric));
+    else if (field === 'pad') clamped = Math.max(0, Math.min(5, numeric));
+    block[field] = Math.round(clamped * 100) / 100;
+    lesRenderProductCardLayoutPreview();
+    lesPersistProductCardPptSettings();
 }
 
 function lesGetProductCardLinkFormat() {
@@ -700,6 +1096,7 @@ function lesWireProductCardPpt() {
         lesEnsureProductCardPptSettings().bannerColor = color;
         bannerColor.value = color;
         bannerHex.value = color;
+        if (typeof lesRenderProductCardLayoutPreview === 'function') lesRenderProductCardLayoutPreview();
         lesPersistProductCardPptSettings();
     };
     bannerColor.addEventListener('input', (e) => persistBannerColor(e.target.value));
@@ -711,14 +1108,23 @@ function lesWireProductCardPpt() {
     [
         ['productCardPptItemLabel', 'item'],
         ['productCardPptDescriptionLabel', 'description'],
-        ['productCardPptSpecificationsLabel', 'specifications']
+        ['productCardPptSpecificationsLabel', 'specifications'],
+        ['productCardPptDepartmentLabel', 'department']
     ].forEach(([id, key]) => {
         const input = document.getElementById(id);
         input.addEventListener('input', () => {
             const settings = lesEnsureProductCardPptSettings();
             settings.labels[key] = input.value.trim().slice(0, 40) || LES_DEFAULT_PRODUCT_CARD_PPT_SETTINGS.labels[key];
+            if (typeof lesRenderProductCardLayoutPreview === 'function') lesRenderProductCardLayoutPreview();
             lesPersistProductCardPptSettings();
         });
+    });
+
+    document.getElementById('productCardPptShowDepartment').addEventListener('change', (e) => {
+        const settings = lesEnsureProductCardPptSettings();
+        settings.showDepartment = e.target.checked;
+        lesRenderProductCardLayoutPreview();
+        lesPersistProductCardPptSettings();
     });
 
     document.querySelectorAll('[data-product-card-link-token]').forEach(btn => {
@@ -746,6 +1152,146 @@ function lesWireProductCardPpt() {
         lesPaintProductCardPpt();
         lesPersistProductCardPptSettings();
     });
+
+    lesWireProductCardLayout();
+}
+
+function lesWireProductCardLayout() {
+    const bgColor = document.getElementById('productCardPptBackground');
+    const bgHex = document.getElementById('productCardPptBackgroundHex');
+    const persistBg = (value) => {
+        const color = lesNormalizeHexColor(value, '#FFFFFF');
+        lesEnsureProductCardTemplate().background = color;
+        bgColor.value = color;
+        bgHex.value = color;
+        lesRenderProductCardLayoutPreview();
+        lesPersistProductCardPptSettings();
+    };
+    bgColor.addEventListener('input', (e) => persistBg(e.target.value));
+    bgHex.addEventListener('change', (e) => persistBg(e.target.value));
+    bgHex.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); persistBg(bgHex.value); bgHex.blur(); }
+    });
+
+    const bannerH = document.getElementById('productCardPptBannerH');
+    bannerH.addEventListener('change', () => {
+        const v = parseFloat(bannerH.value);
+        if (!isFinite(v)) { bannerH.classList.add('is-invalid'); return; }
+        bannerH.classList.remove('is-invalid');
+        const clamped = Math.max(0.2, Math.min(8, v));
+        lesEnsureProductCardTemplate().banner.h = Math.round(clamped * 100) / 100;
+        bannerH.value = String(lesEnsureProductCardTemplate().banner.h);
+        lesRenderProductCardLayoutPreview();
+        lesPersistProductCardPptSettings();
+    });
+
+    const container = document.getElementById('productCardPptLayoutFields');
+    container.addEventListener('change', (e) => {
+        const input = e.target;
+        if (!(input instanceof HTMLInputElement)) return;
+        const row = input.closest('.layout-row');
+        if (!row || !row.dataset.block) return;
+        lesUpdateBlockField(row.dataset.block, input.dataset.field, input.value, input);
+    });
+    container.addEventListener('focusin', (e) => {
+        const row = e.target.closest && e.target.closest('.layout-row');
+        if (row && row.dataset.block) lesHighlightPreviewBlock(row.dataset.block);
+    });
+    container.addEventListener('focusout', () => lesHighlightPreviewBlock(null));
+
+    document.getElementById('resetProductCardPptLayoutBtn').addEventListener('click', () => {
+        if (!confirm('Reset slide layout to defaults? (Keeps your colors, labels and link format.)')) return;
+        const settings = lesEnsureProductCardPptSettings();
+        settings.template = typeof lesCloneProductCardPptTemplate === 'function'
+            ? lesCloneProductCardPptTemplate(null)
+            : JSON.parse(JSON.stringify(LES_DEFAULT_PRODUCT_CARD_PPT_TEMPLATE));
+        lesPaintProductCardLayout();
+        lesPersistProductCardPptSettings();
+    });
+
+    lesWireLayoutCanvasInteractions();
+}
+
+function lesWireLayoutCanvasInteractions() {
+    const stage = document.getElementById('productCardPptLayoutPreview');
+    if (!stage || stage.dataset.dragWired === '1') return;
+    stage.dataset.dragWired = '1';
+
+    const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+    const round2 = (v) => Math.round(v * 100) / 100;
+
+    stage.addEventListener('pointerdown', (e) => {
+        const blockEl = e.target.closest('[data-block]');
+        if (!blockEl || !stage.contains(blockEl)) return;
+        const key = blockEl.dataset.block;
+        if (!LES_PRODUCT_CARD_PPT_TEMPLATE_BLOCKS.includes(key)) return;
+        e.preventDefault();
+
+        const isHandle = e.target.classList.contains('resize-handle');
+        const mode = isHandle ? 'resize' : 'drag';
+        const tpl = lesEnsureProductCardTemplate();
+        const b = tpl.blocks[key];
+        const startCm = { x: b.x, y: b.y, w: b.w, h: b.h };
+        const startClient = { x: e.clientX, y: e.clientY };
+        const stageRect = stage.getBoundingClientRect();
+        const cmPerPx = LES_PRODUCT_CARD_SLIDE_W / stageRect.width;
+        const slideW = LES_PRODUCT_CARD_SLIDE_W;
+        const slideH = LES_PRODUCT_CARD_SLIDE_H;
+        const guides = lesGetLayoutSnapGuides(key);
+
+        document.body.classList.add('layout-dragging');
+        lesHighlightPreviewBlock(key);
+        let pending = null;
+
+        const onMove = (ev) => {
+            const dxCm = (ev.clientX - startClient.x) * cmPerPx;
+            const dyCm = (ev.clientY - startClient.y) * cmPerPx;
+            lesClearSnapGuides(stage);
+            if (mode === 'drag') {
+                const rawX = startCm.x + dxCm;
+                const rawY = startCm.y + dyCm;
+                let nx = lesSnapDragX(rawX, startCm.w, guides.v, stage);
+                let ny = lesSnapDragY(rawY, startCm.h, guides.h, stage);
+                nx = round2(clamp(nx, 0, slideW - startCm.w));
+                ny = round2(clamp(ny, 0, slideH - startCm.h));
+                blockEl.style.left = nx + 'cm';
+                blockEl.style.top = ny + 'cm';
+                pending = { x: nx, y: ny };
+            } else {
+                const rawW = startCm.w + dxCm;
+                const rawH = startCm.h + dyCm;
+                let nw = lesSnapResizeW(startCm.x, rawW, guides.v, stage);
+                let nh = lesSnapResizeH(startCm.y, rawH, guides.h, stage);
+                nw = round2(clamp(nw, 0.2, slideW - startCm.x));
+                nh = round2(clamp(nh, 0.2, slideH - startCm.y));
+                blockEl.style.width = nw + 'cm';
+                blockEl.style.height = nh + 'cm';
+                pending = { w: nw, h: nh };
+            }
+        };
+
+        const onUp = () => {
+            window.removeEventListener('pointermove', onMove);
+            window.removeEventListener('pointerup', onUp);
+            window.removeEventListener('pointercancel', onUp);
+            document.body.classList.remove('layout-dragging');
+            lesClearSnapGuides(stage);
+            if (pending) {
+                const target = lesEnsureProductCardTemplate().blocks[key];
+                Object.assign(target, pending);
+                // Repaint form inputs + preview from the new state.
+                lesPaintProductCardLayout();
+                lesHighlightPreviewBlock(key);
+                lesPersistProductCardPptSettings();
+            }
+        };
+
+        window.addEventListener('pointermove', onMove);
+        window.addEventListener('pointerup', onUp);
+        window.addEventListener('pointercancel', onUp);
+    });
+
+    lesAttachLayoutPreviewResizing();
 }
 
 // =====================================================================

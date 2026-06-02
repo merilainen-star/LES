@@ -81,6 +81,13 @@
               <span class="slider"></span>
             </div>
           </label>
+          <label class="toggle-row">
+            <span class="toggle-label">Hint locked variant options</span>
+            <div class="toggle-switch">
+              <input type="checkbox" id="variantHints" checked>
+              <span class="slider"></span>
+            </div>
+          </label>
         </div>
 
         <div class="card price-simulation-card" id="priceSimulationCard">
@@ -302,6 +309,39 @@
           <div class="kv-row">
             <label class="kv-label" for="productCardPptSpecificationsLabel">Specifications</label>
             <input type="text" id="productCardPptSpecificationsLabel" class="text-input" maxlength="40" placeholder="Specifications">
+          </div>
+          <div class="kv-row">
+            <label class="kv-label" for="productCardPptDepartmentLabel">Department</label>
+            <input type="text" id="productCardPptDepartmentLabel" class="text-input" maxlength="40" placeholder="Department">
+          </div>
+          <label class="toggle-row">
+            <span class="toggle-label">Include department on cart PPT</span>
+            <div class="toggle-switch">
+              <input type="checkbox" id="productCardPptShowDepartment" checked>
+              <span class="slider"></span>
+            </div>
+          </label>
+        </div>
+
+        <div class="card">
+          <h3>Slide layout</h3>
+          <p class="hint">Positions and sizes in centimeters (slide is 33.87 × 19.05 cm). Edit cautiously — bad coordinates may push blocks off the slide. Use Reset to restore defaults.</p>
+          <div class="kv-row">
+            <label class="kv-label" for="productCardPptBackground">Background color</label>
+            <input type="color" id="productCardPptBackground" class="color-input" value="#FFFFFF">
+            <input type="text" id="productCardPptBackgroundHex" class="text-input narrow-input" maxlength="7" placeholder="#FFFFFF">
+          </div>
+          <div class="kv-row">
+            <label class="kv-label" for="productCardPptBannerH">Banner height (cm)</label>
+            <input type="number" id="productCardPptBannerH" class="text-input narrow-input" step="0.1" min="0.2" max="8" value="2.18">
+          </div>
+          <div class="layout-preview-frame" aria-label="Slide preview">
+            <div class="layout-preview-stage" id="productCardPptLayoutPreview"></div>
+          </div>
+          <p class="hint">Preview is approximate; download the PPT to verify exact rendering.</p>
+          <div id="productCardPptLayoutFields" class="layout-fields"></div>
+          <div class="key-actions">
+            <button id="resetProductCardPptLayoutBtn" type="button" class="primary-btn danger-btn">Reset slide layout</button>
           </div>
         </div>
 

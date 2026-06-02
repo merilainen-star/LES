@@ -82,7 +82,7 @@ The extension injects utility buttons directly into the product page DOM to faci
   - **Existing Product** is the concatenation of both parts without the dash plus the company code: `3097296U90BF2`.
   - Company code is detected automatically from the hostname: `.fi` → `BF2`, `.no` → `BNO`, `.dk` → `BDK`, all others → `BSE`.
   - Quantities are read directly from the cart quantity input fields.
-- **PPT button**: Placeholder for a future PowerPoint product-card export (shows a toast for now).
+- **PPT button**: Downloads one PowerPoint deck for the cart. Each cart line becomes one product-card slide using the same layout, image handling, labels, and link format as the product-page PPT export.
 
 **10. Omnibox and SharePoint Search**
 
@@ -129,9 +129,8 @@ The background worker blocks `lesAiSearch`, `lesAiTestKey`, and `lesTranslateTex
 
 ## Installation
 
-- For Firefox releases, use Mozilla Add-ons: <https://addons.mozilla.org/en-US/developers/addon/778ccbb63fa64c838515/edit>.
 - For Edge releases, use Microsoft Edge Add-ons: <https://microsoftedge.microsoft.com/addons/detail/poiadopjpbekbageflcbghabcidpbjhj>.
-- Load as a temporary add-on in `about:debugging` (Firefox) or as an unpacked extension in Edge.
+- Load as an unpacked extension in Edge.
 - Core copy, browsing, notes, PPT, omnibox, and SharePoint features work on matching domains after install. AI Search and translation require the user to enable external services consent in Settings.
 
 ## Release Packaging

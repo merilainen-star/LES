@@ -2,7 +2,7 @@
 
 ## v1.30 — 2026-05-22
 
-- **Cart quotation export** — PPT and CSV buttons appear in the mini-cart flyout above the checkout button whenever the cart contains items. Clicking CSV downloads a semicolon-delimited file pre-formatted for the Microsoft Dynamics 365 CE mass-import template: article number is split at the dash into *Product number* and *Product configuration*, and the *Existing Product* key is constructed as `<base><config><company>` (e.g. `3097296U90BF2`). Company code is detected automatically from the site domain (`.fi` → `BF2`, `.no` → `BNO`, `.dk` → `BDK`, default → `BSE`).
+- **Cart quotation export** — PPT and CSV buttons appear in the mini-cart flyout above the checkout button whenever the cart contains items. Clicking PPT downloads one PowerPoint deck with one product-card slide per cart line, using the same slide layout as the product-page PPT export. Clicking CSV downloads a semicolon-delimited file pre-formatted for the Microsoft Dynamics 365 CE mass-import template: article number is split at the dash into *Product number* and *Product configuration*, and the *Existing Product* key is constructed as `<base><config><company>` (e.g. `3097296U90BF2`). Company code is detected automatically from the site domain (`.fi` → `BF2`, `.no` → `BNO`, `.dk` → `BDK`, default → `BSE`).
 
 ## v1.29 — 2026-05-19
 
@@ -35,7 +35,7 @@
 - **Reset to defaults** button on the Advanced tab.
 - **Debug logging** toggle for verbose `[LES]` console output when reporting issues.
 - **What's new + About** tabs in settings, with an unread dot in the settings sidebar.
-- **Firefox Add-ons link** in the Firefox settings About tab, pointing to the Mozilla Add-ons page.
+- **Edge Add-ons link** in the Edge settings About tab, pointing to the Microsoft Edge Add-ons page.
 - **Feature documentation check** blocks commits, pushes, and releases when add-on feature changes are missing README or What's new updates.
 
 ## v1.25 — 2026-04

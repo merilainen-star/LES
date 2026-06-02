@@ -82,7 +82,7 @@ The extension injects utility buttons directly into the product page DOM to faci
   - **Existing Product** is the concatenation of both parts without the dash plus the company code: `3097296U90BF2`.
   - Company code is detected automatically from the hostname: `.fi` → `BF2`, `.no` → `BNO`, `.dk` → `BDK`, all others → `BSE`.
   - Quantities are read directly from the cart quantity input fields.
-- **PPT button**: Placeholder for a future PowerPoint product-card export (shows a toast for now).
+- **PPT button**: Downloads one PowerPoint deck for the cart. Each cart line becomes one product-card slide using the same layout, image handling, labels, and link format as the product-page PPT export.
 
 **10. Omnibox and SharePoint Search**
 

@@ -30,17 +30,165 @@ const LES_DEFAULT_FORMATS = {
     }
 };
 
+// Slide layout template (centimeters; slide is 33.867 x 19.05 cm — LAYOUT_WIDE).
+// Used by both content.js and background.js to position blocks on the
+// product-card slide, and by options.js to render the layout editor.
+// Values are stored in cm and converted to inches at PPT generation (cmToIn).
+// Font sizes stay in points (pt); padding is in cm.
+const LES_DEFAULT_PRODUCT_CARD_PPT_TEMPLATE = {
+    unit: 'cm',
+    background: '#FFFFFF',
+    banner: { h: 2.18 },
+    blocks: {
+        title:      { x: 1.14,  y: 0.30,  w: 21.97, h: 1.57,  fontSize: 23 },
+        sku:        { x: 23.50, y: 0.51,  w: 8.76,  h: 1.12,  fontSize: 12 },
+        image:      { x: 1.40,  y: 3.43,  w: 13.08, h: 11.81, pad: 0.25 },
+        descLabel:  { x: 15.37, y: 3.05,  w: 16.89, h: 0.71,  fontSize: 12 },
+        desc:       { x: 15.37, y: 3.94,  w: 16.89, h: 3.76,  fontSize: 11 },
+        specsLabel: { x: 15.37, y: 8.20,  w: 16.89, h: 0.71,  fontSize: 12 },
+        specs:      { x: 15.37, y: 9.09,  w: 16.89, h: 5.79,  fontSize: 9.5 },
+        link:       { x: 1.40,  y: 15.70, w: 30.86, h: 0.97,  fontSize: 8 },
+        departmentLabel: { x: 15.35, y: 17.10, w: 3.10, h: 0.34, fontSize: 8 },
+        department:      { x: 15.35, y: 17.48, w: 8.80, h: 0.50, fontSize: 10 }
+    },
+    footer: {
+        envLogos:    { y: 17.22, h: 0.97, slotW: 2.67, startX: 1.40, maxRight: 14.61, gap: 0.41 },
+        lekolarLogo: { rightX: 32.26, y: 17.22, w: 3.80, h: 0.85 }
+    }
+};
+
+const LES_PRODUCT_CARD_PPT_TEMPLATE_BLOCKS = [
+    'title', 'sku', 'image', 'descLabel', 'desc', 'specsLabel', 'specs', 'link', 'departmentLabel', 'department'
+];
+
 const LES_DEFAULT_PRODUCT_CARD_PPT_SETTINGS = {
     bannerColor: '#B5121B',
     labels: {
         item: 'Item',
         description: 'Description',
-        specifications: 'Specifications'
+        specifications: 'Specifications',
+        department: 'Department'
     },
+    showDepartment: true,
     linkFormat: {
         tokens: [{ type: 'url' }]
-    }
+    },
+    template: LES_DEFAULT_PRODUCT_CARD_PPT_TEMPLATE
 };
+
+// Slide dimensions in centimeters (LAYOUT_WIDE = 13.333 x 7.5 in = 33.867 x 19.05 cm).
+const LES_PRODUCT_CARD_SLIDE_W = 33.867;
+const LES_PRODUCT_CARD_SLIDE_H = 19.05;
+const LES_CM_PER_INCH = 2.54;
+
+function lesIsFiniteNumber(v) {
+    return typeof v === 'number' && isFinite(v);
+}
+
+function lesCmToIn(v) {
+    return v / LES_CM_PER_INCH;
+}
+
+function lesClampCm(v, min, max) {
+    if (!lesIsFiniteNumber(v)) return null;
+    if (v < min) return min;
+    if (v > max) return max;
+    return Math.round(v * 100) / 100;
+}
+
+function lesNormalizeBlock(raw, def, opts) {
+    const out = { ...def };
+    if (!raw || typeof raw !== 'object') return out;
+    const slideW = LES_PRODUCT_CARD_SLIDE_W;
+    const slideH = LES_PRODUCT_CARD_SLIDE_H;
+    const fields = [
+        { key: 'x', min: 0, max: slideW },
+        { key: 'y', min: 0, max: slideH },
+        { key: 'w', min: 0.2, max: slideW },
+        { key: 'h', min: 0.2, max: slideH }
+    ];
+    for (const f of fields) {
+        const c = lesClampCm(raw[f.key], f.min, f.max);
+        if (c !== null) out[f.key] = c;
+    }
+    if (opts && opts.fontSize && lesIsFiniteNumber(raw.fontSize)) {
+        out.fontSize = Math.max(4, Math.min(96, Math.round(raw.fontSize * 10) / 10));
+    }
+    if (opts && opts.pad && lesIsFiniteNumber(raw.pad)) {
+        out.pad = Math.max(0, Math.min(5, Math.round(raw.pad * 100) / 100));
+    }
+    return out;
+}
+
+// Pre-cm-migration templates stored x/y/w/h/pad/banner.h/footer.* in inches.
+// Detect via missing `unit: 'cm'` marker and scale numerics up by 2.54.
+function lesScaleRawTemplateFromInches(raw) {
+    if (!raw || typeof raw !== 'object') return raw;
+    const r = JSON.parse(JSON.stringify(raw));
+    const s = LES_CM_PER_INCH;
+    if (r.banner && lesIsFiniteNumber(r.banner.h)) r.banner.h *= s;
+    if (r.blocks && typeof r.blocks === 'object') {
+        for (const k of Object.keys(r.blocks)) {
+            const b = r.blocks[k];
+            if (!b || typeof b !== 'object') continue;
+            ['x', 'y', 'w', 'h', 'pad'].forEach(f => {
+                if (lesIsFiniteNumber(b[f])) b[f] *= s;
+            });
+        }
+    }
+    if (r.footer && typeof r.footer === 'object') {
+        for (const fkey of ['envLogos', 'lekolarLogo']) {
+            const f = r.footer[fkey];
+            if (!f || typeof f !== 'object') continue;
+            for (const fld of Object.keys(f)) {
+                if (lesIsFiniteNumber(f[fld])) f[fld] *= s;
+            }
+        }
+    }
+    return r;
+}
+
+function lesCloneProductCardPptTemplate(raw) {
+    const def = LES_DEFAULT_PRODUCT_CARD_PPT_TEMPLATE;
+    const out = JSON.parse(JSON.stringify(def));
+    if (!raw || typeof raw !== 'object') return out;
+    if (raw.unit !== 'cm') raw = lesScaleRawTemplateFromInches(raw);
+
+    if (typeof raw.background === 'string' && /^#[0-9a-f]{6}$/i.test(raw.background.trim())) {
+        out.background = raw.background.trim();
+    }
+    if (raw.banner && lesIsFiniteNumber(raw.banner.h)) {
+        const h = lesClampCm(raw.banner.h, 0.2, LES_PRODUCT_CARD_SLIDE_H);
+        if (h !== null) out.banner.h = h;
+    }
+    if (raw.blocks && typeof raw.blocks === 'object') {
+        for (const key of LES_PRODUCT_CARD_PPT_TEMPLATE_BLOCKS) {
+            const opts = { fontSize: key !== 'image', pad: key === 'image' };
+            out.blocks[key] = lesNormalizeBlock(raw.blocks[key], def.blocks[key], opts);
+        }
+    }
+    if (raw.footer && typeof raw.footer === 'object') {
+        if (raw.footer.envLogos && typeof raw.footer.envLogos === 'object') {
+            const e = raw.footer.envLogos;
+            const d = def.footer.envLogos;
+            const merged = { ...d };
+            for (const [k, v] of Object.entries(e)) {
+                if (lesIsFiniteNumber(v)) merged[k] = Math.round(v * 100) / 100;
+            }
+            out.footer.envLogos = merged;
+        }
+        if (raw.footer.lekolarLogo && typeof raw.footer.lekolarLogo === 'object') {
+            const l = raw.footer.lekolarLogo;
+            const d = def.footer.lekolarLogo;
+            const merged = { ...d };
+            for (const [k, v] of Object.entries(l)) {
+                if (lesIsFiniteNumber(v)) merged[k] = Math.round(v * 100) / 100;
+            }
+            out.footer.lekolarLogo = merged;
+        }
+    }
+    return out;
+}
 
 const LES_DEFAULT_SETTINGS = {
     // Master switch
@@ -52,6 +200,7 @@ const LES_DEFAULT_SETTINGS = {
     copyButtons: true,
     hideEnvironmentalLogo: false,
     productLayoutDivider: true,
+    variantHints: true,
     priceAdjustmentEnabled: false,
     priceAdjustmentPercent: 0,
     priceAdjustmentHighlightColor: '#fff3bf',
@@ -106,11 +255,15 @@ function lesCloneProductCardPptSettings(raw) {
     }
 
     if (raw.labels && typeof raw.labels === 'object') {
-        ['item', 'description', 'specifications'].forEach(key => {
+        ['item', 'description', 'specifications', 'department'].forEach(key => {
             if (typeof raw.labels[key] === 'string' && raw.labels[key].trim()) {
                 out.labels[key] = raw.labels[key].trim().slice(0, 40);
             }
         });
+    }
+
+    if (typeof raw.showDepartment === 'boolean') {
+        out.showDepartment = raw.showDepartment;
     }
 
     const linkFormat = raw.linkFormat && typeof raw.linkFormat === 'object'
@@ -124,6 +277,8 @@ function lesCloneProductCardPptSettings(raw) {
     if (clonedLink && clonedLink.tokens.length > 0) {
         out.linkFormat.tokens = clonedLink.tokens;
     }
+
+    out.template = lesCloneProductCardPptTemplate(raw.template);
 
     return out;
 }
@@ -219,6 +374,12 @@ if (typeof globalThis !== 'undefined') {
     globalThis.LES_DEFAULT_SETTINGS = LES_DEFAULT_SETTINGS;
     globalThis.LES_DEFAULT_FORMATS = LES_DEFAULT_FORMATS;
     globalThis.LES_DEFAULT_PRODUCT_CARD_PPT_SETTINGS = LES_DEFAULT_PRODUCT_CARD_PPT_SETTINGS;
+    globalThis.LES_DEFAULT_PRODUCT_CARD_PPT_TEMPLATE = LES_DEFAULT_PRODUCT_CARD_PPT_TEMPLATE;
+    globalThis.LES_PRODUCT_CARD_PPT_TEMPLATE_BLOCKS = LES_PRODUCT_CARD_PPT_TEMPLATE_BLOCKS;
+    globalThis.LES_PRODUCT_CARD_SLIDE_W = LES_PRODUCT_CARD_SLIDE_W;
+    globalThis.LES_PRODUCT_CARD_SLIDE_H = LES_PRODUCT_CARD_SLIDE_H;
+    globalThis.LES_CM_PER_INCH = LES_CM_PER_INCH;
+    globalThis.lesCmToIn = lesCmToIn;
     globalThis.LES_COUNTRY_CODES = LES_COUNTRY_CODES;
     globalThis.lesMergeSettings = lesMergeSettings;
     globalThis.lesRenderCopyFormat = lesRenderCopyFormat;
@@ -226,4 +387,5 @@ if (typeof globalThis !== 'undefined') {
     globalThis.lesCountryForHost = lesCountryForHost;
     globalThis.lesCloneFormat = lesCloneFormat;
     globalThis.lesCloneProductCardPptSettings = lesCloneProductCardPptSettings;
+    globalThis.lesCloneProductCardPptTemplate = lesCloneProductCardPptTemplate;
 }

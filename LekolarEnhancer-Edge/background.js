@@ -508,6 +508,12 @@ function lesCreateProductCardFileName(product) {
     return `${lesProductCardSafeFileName(`${sku ? sku + ' - ' : ''}${title}`)}.pptx`;
 }
 
+function lesCreateProductCardDeckFileName(fileName) {
+    const raw = String(fileName || '').replace(/\.pptx$/i, '').trim();
+    const requested = raw ? lesProductCardSafeFileName(raw) : 'Lekolar_Cart_Product_Cards';
+    return `${requested || 'Lekolar_Cart_Product_Cards'}.pptx`;
+}
+
 function lesGetPptxGenConstructor() {
     const root = typeof globalThis !== 'undefined'
         ? globalThis
@@ -601,58 +607,92 @@ function lesGetProductCardLinkText(product, settings) {
     return lesTruncateProductCardText(text || context.url, 240);
 }
 
-function lesAddProductCardFooterLogos(slide, product) {
-    let x = 0.55;
-    const y = 6.78;
-    const maxRight = 5.75;
+const LES_BG_PRODUCT_CARD_MASTER_NAME = 'LES_PRODUCT_CARD';
+
+function lesGetProductCardTemplate(settings) {
+    const tpl = settings && settings.template;
+    if (tpl && typeof tpl === 'object') return tpl;
+    if (typeof lesCloneProductCardPptTemplate === 'function') {
+        return lesCloneProductCardPptTemplate(null);
+    }
+    return null;
+}
+
+function lesAddProductCardFooterLogos(slide, product, template) {
+    const footer = (template && template.footer) || {};
+    const envCm = footer.envLogos || { y: 17.22, h: 0.97, slotW: 2.67, startX: 1.40, maxRight: 14.61, gap: 0.41 };
+    const lekCm = footer.lekolarLogo || { rightX: 32.26, y: 17.17, w: 2.41, h: 1.07 };
+    const env = {
+        y: lesCmToIn(envCm.y), h: lesCmToIn(envCm.h), slotW: lesCmToIn(envCm.slotW),
+        startX: lesCmToIn(envCm.startX), maxRight: lesCmToIn(envCm.maxRight), gap: lesCmToIn(envCm.gap)
+    };
+    const lek = {
+        rightX: lesCmToIn(lekCm.rightX), y: lesCmToIn(lekCm.y),
+        w: lesCmToIn(lekCm.w), h: lesCmToIn(lekCm.h)
+    };
+
+    let x = env.startX;
     (product.environmentalLogos || []).forEach(logo => {
-        if (!logo || !logo.dataUri || x >= maxRight) return;
-        const box = lesGetProductCardLogoPlacement(logo.imageSize, { x, y, w: 1.05, h: 0.38 });
-        if (box.x + box.w > maxRight) return;
-        slide.addImage({
-            data: logo.dataUri,
-            x: box.x,
-            y: box.y,
-            w: box.w,
-            h: box.h
-        });
-        x = box.x + box.w + 0.16;
+        if (!logo || !logo.dataUri || x >= env.maxRight) return;
+        const box = lesGetProductCardLogoPlacement(logo.imageSize, { x, y: env.y, w: env.slotW, h: env.h });
+        if (box.x + box.w > env.maxRight) return;
+        slide.addImage({ data: logo.dataUri, x: box.x, y: box.y, w: box.w, h: box.h });
+        x = box.x + box.w + env.gap;
     });
 
-    if (product.lekolarLogo && product.lekolarLogo.dataUri) {
-        const logoBox = lesGetProductCardLogoPlacement(product.lekolarLogo.imageSize, {
-            x: 11.75,
-            y: 6.76,
-            w: 0.95,
-            h: 0.42
+    const lekolarLogo = product && product.lekolarLogo;
+    if (lekolarLogo && lekolarLogo.dataUri) {
+        const box = lesGetProductCardLogoPlacement(lekolarLogo.imageSize, {
+            x: lek.rightX - lek.w,
+            y: lek.y,
+            w: lek.w,
+            h: lek.h
         });
-        slide.addImage({
-            data: product.lekolarLogo.dataUri,
-            x: 12.70 - logoBox.w,
-            y: logoBox.y,
-            w: logoBox.w,
-            h: logoBox.h
-        });
+        slide.addImage({ data: lekolarLogo.dataUri, x: box.x, y: box.y, w: box.w, h: box.h });
     }
 }
 
-async function lesCreateProductCardPptx(product) {
-    const PptxGenJS = lesGetPptxGenConstructor();
+function lesCreateProductCardDeck(PptxGenJS, title, subject = 'Product card', pptSettings = null) {
     const pptx = new PptxGenJS();
     pptx.layout = 'LAYOUT_WIDE';
     pptx.author = 'Lekolar Enhancer';
     pptx.company = 'Lekolar';
-    pptx.subject = 'Product card';
-    pptx.title = product.title || 'Product card';
+    pptx.subject = subject;
+    pptx.title = title || subject || 'Product card';
     pptx.lang = 'en-US';
 
-    const slide = pptx.addSlide();
-    slide.background = { color: 'FFFFFF' };
+    const settings = lesGetProductCardPptSettings(pptSettings);
+    const template = lesGetProductCardTemplate(settings);
+    const accentColor = lesProductCardPptColor(settings.bannerColor);
+    const bgColor = lesProductCardPptColor(template && template.background, 'FFFFFF');
+    const bannerHcm = (template && template.banner && template.banner.h) || 2.18;
+    const rectShape = (pptx.ShapeType && pptx.ShapeType.rect) || 'rect';
 
-    const shapeType = pptx.ShapeType || {};
-    const rectShape = shapeType.rect || 'rect';
+    pptx.defineSlideMaster({
+        title: LES_BG_PRODUCT_CARD_MASTER_NAME,
+        background: { color: bgColor },
+        objects: [
+            { rect: { x: 0, y: 0, w: 13.333, h: lesCmToIn(bannerHcm), fill: { color: accentColor }, line: { color: accentColor } } }
+        ]
+    });
+
+    pptx._lesProductCardCtx = { template, accentColor, bgColor, rectShape };
+    return pptx;
+}
+
+function lesAddProductCardSlide(pptx, product) {
     const pptSettings = lesGetProductCardPptSettings(product.pptSettings);
-    const accentColor = lesProductCardPptColor(pptSettings.bannerColor);
+    const ctx = pptx._lesProductCardCtx || {
+        template: lesGetProductCardTemplate(pptSettings),
+        accentColor: lesProductCardPptColor(pptSettings.bannerColor),
+        rectShape: (pptx.ShapeType && pptx.ShapeType.rect) || 'rect'
+    };
+    const template = ctx.template;
+    const accentColor = ctx.accentColor;
+    const rectShape = ctx.rectShape;
+    const blocks = (template && template.blocks) || {};
+    const slide = pptx.addSlide({ masterName: LES_BG_PRODUCT_CARD_MASTER_NAME });
+
     const imageData = product.imageData || '';
     const title = product.title || 'Product card';
     const skuText = product.sku ? `${pptSettings.labels.item} ${product.sku}` : 'Product card';
@@ -660,54 +700,95 @@ async function lesCreateProductCardPptx(product) {
     const specLines = product.specs && product.specs.length ? product.specs : ['No product specifications found on page.'];
     const specsText = specLines.map(line => `- ${line}`).join('\n');
 
-    slide.addShape(rectShape, { x: 0, y: 0, w: 13.333, h: 0.86, fill: { color: accentColor }, line: { color: accentColor } });
-    slide.addText(title, { x: 0.45, y: 0.12, w: 8.65, h: 0.62, margin: 0.04, fontFace: 'Arial', fontSize: 23, bold: true, color: 'FFFFFF', valign: 'middle', fit: 'shrink' });
-    slide.addText(skuText, { x: 9.25, y: 0.20, w: 3.45, h: 0.44, margin: 0.04, fontFace: 'Arial', fontSize: 12, bold: true, color: 'FFFFFF', align: 'right', valign: 'middle', fit: 'shrink' });
+    const inBox = (b) => ({ x: lesCmToIn(b.x), y: lesCmToIn(b.y), w: lesCmToIn(b.w), h: lesCmToIn(b.h) });
 
-    slide.addShape(rectShape, { x: 0.55, y: 1.35, w: 5.15, h: 4.65, fill: { color: 'F8FAFC' }, line: { color: 'E2E8F0', width: 1 } });
+    const titleB = inBox(blocks.title);
+    const skuB = inBox(blocks.sku);
+    slide.addText(title, { ...titleB, margin: 0.04, fontFace: 'Arial', fontSize: blocks.title.fontSize, bold: true, color: 'FFFFFF', valign: 'middle', fit: 'shrink' });
+    slide.addText(skuText, { ...skuB, margin: 0.04, fontFace: 'Arial', fontSize: blocks.sku.fontSize, bold: true, color: 'FFFFFF', align: 'right', valign: 'middle', fit: 'shrink' });
+
+    const imageCm = blocks.image;
+    const imageB = inBox(imageCm);
+    const imagePadIn = lesCmToIn(lesIsFiniteNumber(imageCm.pad) ? imageCm.pad : 0.25);
+    slide.addShape(rectShape, { ...imageB, fill: { color: 'F8FAFC' }, line: { color: 'E2E8F0', width: 1 } });
     if (imageData) {
         const imageBox = lesGetProductCardImagePlacement(product.imageSize, {
-            x: 0.65,
-            y: 1.45,
-            w: 4.95,
-            h: 4.45
+            x: imageB.x + imagePadIn,
+            y: imageB.y + imagePadIn,
+            w: imageB.w - imagePadIn * 2,
+            h: imageB.h - imagePadIn * 2
         });
-        slide.addImage({
-            data: imageData,
-            x: imageBox.x,
-            y: imageBox.y,
-            w: imageBox.w,
-            h: imageBox.h
-        });
+        slide.addImage({ data: imageData, x: imageBox.x, y: imageBox.y, w: imageBox.w, h: imageBox.h });
     } else {
-        slide.addText('No product image', { x: 0.75, y: 3.25, w: 4.75, h: 0.35, fontFace: 'Arial', fontSize: 16, color: '64748B', align: 'center' });
+        slide.addText('No product image', {
+            x: imageB.x + imagePadIn,
+            y: imageB.y + (imageB.h - 0.35) / 2,
+            w: imageB.w - imagePadIn * 2,
+            h: 0.35,
+            fontFace: 'Arial', fontSize: 16, color: '64748B', align: 'center'
+        });
     }
 
-    slide.addText(pptSettings.labels.description, { x: 6.05, y: 1.20, w: 6.65, h: 0.28, fontFace: 'Arial', fontSize: 12, bold: true, color: accentColor, margin: 0 });
-    slide.addText(descText, { x: 6.05, y: 1.55, w: 6.65, h: 1.48, fontFace: 'Arial', fontSize: 11, color: '1F2937', margin: 0.06, breakLine: false, fit: 'shrink', valign: 'top' });
-    slide.addText(pptSettings.labels.specifications, { x: 6.05, y: 3.23, w: 6.65, h: 0.28, fontFace: 'Arial', fontSize: 12, bold: true, color: accentColor, margin: 0 });
-    slide.addText(specsText, { x: 6.05, y: 3.58, w: 6.65, h: 2.28, fontFace: 'Arial', fontSize: 9.5, color: '1F2937', margin: 0.06, breakLine: false, fit: 'shrink', valign: 'top' });
+    const dL = inBox(blocks.descLabel), dB = inBox(blocks.desc), sL = inBox(blocks.specsLabel), sB = inBox(blocks.specs);
+    slide.addText(pptSettings.labels.description, { ...dL, fontFace: 'Arial', fontSize: blocks.descLabel.fontSize, bold: true, color: accentColor, margin: 0 });
+    slide.addText(descText, { ...dB, fontFace: 'Arial', fontSize: blocks.desc.fontSize, color: '1F2937', margin: 0.06, breakLine: false, fit: 'shrink', valign: 'top' });
+    slide.addText(pptSettings.labels.specifications, { ...sL, fontFace: 'Arial', fontSize: blocks.specsLabel.fontSize, bold: true, color: accentColor, margin: 0 });
+    slide.addText(specsText, { ...sB, fontFace: 'Arial', fontSize: blocks.specs.fontSize, color: '1F2937', margin: 0.06, breakLine: false, fit: 'shrink', valign: 'top' });
+
+    const departmentText = String(product.department || '').replace(/\s+/g, ' ').trim();
+    if (departmentText && pptSettings.showDepartment !== false && blocks.departmentLabel && blocks.department) {
+        const deptLabelB = inBox(blocks.departmentLabel);
+        const deptB = inBox(blocks.department);
+        slide.addText(pptSettings.labels.department || 'Department', {
+            ...deptLabelB,
+            fontFace: 'Arial', fontSize: blocks.departmentLabel.fontSize, bold: true,
+            color: accentColor, margin: 0, fit: 'shrink'
+        });
+        slide.addText(departmentText, {
+            ...deptB,
+            fontFace: 'Arial', fontSize: blocks.department.fontSize, bold: true,
+            color: '1F2937', margin: 0, fit: 'shrink'
+        });
+    }
 
     if (product.url) {
+        const lB = inBox(blocks.link);
         slide.addText(lesGetProductCardLinkText(product, pptSettings), {
-            x: 0.55,
-            y: 6.18,
-            w: 12.15,
-            h: 0.38,
-            fontFace: 'Arial',
-            fontSize: 8,
-            color: '2563EB',
-            margin: 0,
+            ...lB,
+            fontFace: 'Arial', fontSize: blocks.link.fontSize, color: '2563EB', margin: 0,
             hyperlink: { url: product.url, tooltip: 'Open product page' },
             fit: 'shrink'
         });
     }
 
-    lesAddProductCardFooterLogos(slide, product);
+    lesAddProductCardFooterLogos(slide, product, template);
+    return slide;
+}
+
+async function lesCreateProductCardPptx(product) {
+    const PptxGenJS = lesGetPptxGenConstructor();
+    const pptx = lesCreateProductCardDeck(PptxGenJS, product.title || 'Product card', 'Product card', product.pptSettings);
+    lesAddProductCardSlide(pptx, product);
     const base64 = await pptx.write({ outputType: 'base64', compression: true });
     return {
         ok: true,
         fileName: lesCreateProductCardFileName(product),
+        mimeType: LES_PRODUCT_CARD_PPTX_MIME,
+        base64
+    };
+}
+
+async function lesCreateProductCardDeckPptx(products, fileName) {
+    const validProducts = Array.isArray(products) ? products.filter(Boolean) : [];
+    if (validProducts.length === 0) throw new Error('No products supplied for cart PPT.');
+
+    const PptxGenJS = lesGetPptxGenConstructor();
+    const pptx = lesCreateProductCardDeck(PptxGenJS, 'Lekolar cart product cards', 'Cart product cards', validProducts[0] && validProducts[0].pptSettings);
+    validProducts.forEach(product => lesAddProductCardSlide(pptx, product));
+    const base64 = await pptx.write({ outputType: 'base64', compression: true });
+    return {
+        ok: true,
+        fileName: lesCreateProductCardDeckFileName(fileName),
         mimeType: LES_PRODUCT_CARD_PPTX_MIME,
         base64
     };
@@ -723,6 +804,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             .then(sendResponse)
             .catch((error) => {
                 console.error('LES: Background product card PPT generation failed:', error);
+                sendResponse({
+                    ok: false,
+                    error: (error && error.message) ? error.message : String(error)
+                });
+            });
+
+        return true;
+    }
+
+    if (message.action === 'lesCreateProductCardDeckPptx') {
+        lesCreateProductCardDeckPptx(message.products || [], message.fileName)
+            .then(sendResponse)
+            .catch((error) => {
+                console.error('LES: Background cart product card PPT generation failed:', error);
                 sendResponse({
                     ok: false,
                     error: (error && error.message) ? error.message : String(error)
