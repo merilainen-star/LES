@@ -18,7 +18,7 @@
 4. `node scripts/build-extension-packages.js` creates clean `dist/firefox` and `dist/edge` packages from an explicit allowlist.
 5. `node scripts/check-extension-packages.js` verifies package contents, manifest references, `importScripts()` dependencies, external host declarations, and JavaScript syntax.
 6. Firefox is linted, signed, and uploaded from `dist/firefox/`.
-7. Edge is zipped from `dist/edge/`, smoke-checked for a root `manifest.json` and forbidden dev artifacts, then submitted to Edge Add-ons.
+7. Edge is zipped from `dist/edge/`, smoke-checked for a root `manifest.json` and forbidden dev artifacts, uploaded as a workflow artifact named `edge-extension-<version>`, then submitted to Edge Add-ons.
 
 ## Commit and Push Checks
 
@@ -35,6 +35,6 @@
 - Keep all extension-owned user-facing text in English for the Nordic internal userbase. Market-language strings may be used internally for page parsing/search matching, but not as add-on UI labels.
 - Every feature change must be documented in both add-on README files and both What's new changelog files before release.
 - To keep Git and the stores in sync, bump the manifest version in your commit before pushing to `main`.
-- `scripts/build-edge-zip.ps1` uses the same clean package builder and checker before creating `edge-extension.zip` from `dist/edge`.
+- `scripts/build-edge-zip.ps1` uses the same clean package builder and checker before creating both `edge-extension.zip` and `edge-extension-<version>.zip` from `dist/edge`.
 - `sync-edge-variant.ps1` only syncs shared source files; it does not create release ZIPs.
 - Release history is documented in the add-on What's new changelog files, Git history, and store submissions.

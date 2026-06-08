@@ -146,6 +146,14 @@ jobs:
             exit 1
           fi
 
+      - name: Upload Edge ZIP artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: edge-extension-${{ needs.prepare-release.outputs.release_version }}
+          path: edge-extension.zip
+          if-no-files-found: error
+          retention-days: 30
+
       - name: Check Edge publishing secrets
         env:
           EDGE_API_KEY: ${{ secrets.EDGE_API_KEY }}
