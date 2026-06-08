@@ -3649,6 +3649,7 @@ function ensureCardActionToolbar(card) {
     }
 
     card.classList.add('les-compact-card-actions');
+    ensureCardProductNumberLine(card);
     ensureCardCartProxy(card, toolbar);
 
     return toolbar;
@@ -3761,8 +3762,46 @@ function extractProductNumberFromCard(card) {
     }
 
     const text = normalizeWhitespace((card.querySelector('.product-artno, .eS-product-artno, [class*="artno"]') || card).textContent || '');
-    const match = text.match(/(?:Tuotenro|Art\.nr|Varenr)[\.\s:]*\s*([\d-]+)/i);
+    const match = text.match(/(?:Tuotenro|Art\.nr|Varenr)[\.\s:]*\s*([0-9A-Za-z-]+)/i);
     return match ? match[1] : '';
+}
+
+function getCardProductNumberAnchor(card) {
+    const nameElement = getProductCardNameElement(card);
+    if (!nameElement) return null;
+
+    const nameBlock = nameElement.closest('.product-title, .inner-title, h3, .product-name, .eS-productname');
+    const anchor = nameBlock && card.contains(nameBlock) ? nameBlock : nameElement;
+    anchor.classList.add('les-card-title-host');
+    return anchor;
+}
+
+function ensureCardProductNumberLine(card) {
+    if (!card) return null;
+
+    let line = card.querySelector('.les-card-product-number');
+    if (!line) {
+        line = document.createElement('div');
+        line.className = 'les-card-product-number';
+        line.setAttribute('aria-label', 'Item number');
+    }
+
+    const anchor = getCardProductNumberAnchor(card);
+    if (anchor && anchor.parentElement && line.previousElementSibling !== anchor) {
+        anchor.insertAdjacentElement('afterend', line);
+        return line;
+    }
+
+    if (!line.parentElement) {
+        const description = card.querySelector('.inner-info-description, .product-description, .description');
+        if (description && description.parentElement) {
+            description.insertAdjacentElement('beforebegin', line);
+        } else {
+            card.appendChild(line);
+        }
+    }
+
+    return line;
 }
 
 function setCardProductNumber(card, number, button) {
@@ -3770,6 +3809,13 @@ function setCardProductNumber(card, number, button) {
     if (!card || !cleanNumber) return;
 
     card.querySelectorAll('.les-injected-artno').forEach(el => el.remove());
+
+    const numberLine = ensureCardProductNumberLine(card);
+    if (numberLine) {
+        numberLine.textContent = cleanNumber;
+        numberLine.dataset.value = cleanNumber;
+        numberLine.title = `Item number ${cleanNumber}`;
+    }
 
     if (button) {
         button.dataset.value = cleanNumber;
@@ -7669,7 +7715,7 @@ function extractProductNumberFromDoc(doc) {
         for (let i = 0; i < result.snapshotLength; i++) {
             const element = result.snapshotItem(i);
             const text = (element.textContent || '').trim();
-            const match = text.match(/(?:Tuotenro|Art\.nr|Varenr)[\.\s:]*\s*([\d-]+)/i);
+            const match = text.match(/(?:Tuotenro|Art\.nr|Varenr)[\.\s:]*\s*([0-9A-Za-z-]+)/i);
             if (match) {
                 productNumber = match[1];
                 break;
@@ -7680,7 +7726,7 @@ function extractProductNumberFromDoc(doc) {
                 next = next.nextSibling;
             }
             if (next && next.textContent) {
-                const numberMatch = next.textContent.trim().match(/^:?\s*([\d-]+)/);
+                const numberMatch = next.textContent.trim().match(/^:?\s*([0-9A-Za-z-]+)/);
                 if (numberMatch) {
                     productNumber = numberMatch[1];
                     break;
@@ -7871,6 +7917,10 @@ function injectCopyButtonOnCard(card, number) {
 async function handleProductCardHover(card) {
     injectNameSearchOnCard(card);
     ensureCardCopyAction(card);
+    const copyButton = card.querySelector('.les-card-copy-btn');
+    resolveCardProductNumber(card, copyButton).catch(error => {
+        console.error('LES: Failed to resolve hovered card product number', error);
+    });
     injectCompareButtonOnCard(card);
 }
 

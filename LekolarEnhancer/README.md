@@ -84,12 +84,18 @@ The extension injects utility buttons directly into the product page DOM to faci
   - Quantities are read directly from the cart quantity input fields.
 - **PPT button**: Downloads one PowerPoint deck for the cart. Each cart line becomes one product-card slide using the same layout, image handling, labels, and link format as the product-page PPT export.
 
-**10. Omnibox and SharePoint Search**
+**10. Search Result Card Item Numbers**
+
+- **Location**: Category and search result product cards, directly below the product name and above the description.
+- **Action**: Shows a compact item-number line and keeps the injected action toolbar aligned even when product names wrap to different line counts.
+- **Variant handling**: On card hover, missing or configured item numbers are resolved from the linked product page and reused by the copy button.
+
+**11. Omnibox and SharePoint Search**
 
 - **Omnibox keyword**: Type `l` in the browser address bar to search Lekolar products.
 - **SharePoint**: Optional SharePoint search helpers use the declared `lekolarab.sharepoint.com` host permission.
 
-**10. AI Search and Swedish Source Translation**
+**12. AI Search and Swedish Source Translation**
 
 - **AI Search**: Optional beta feature that sends the typed query only to the selected AI provider after the user enables external services consent.
 - **Translation**: Optional helper that sends selected/source text to MyMemory only after the user enables external services consent.

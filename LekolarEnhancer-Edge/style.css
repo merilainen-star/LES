@@ -1398,6 +1398,24 @@ html.les-theme-black .les-product-tree-child-count {
     box-shadow: 0 3px 10px rgba(15, 23, 42, 0.08);
 }
 
+.les-compact-card-actions .les-card-title-host {
+    display: block;
+    min-height: 3.6em;
+    margin-bottom: 0 !important;
+}
+
+.les-card-product-number {
+    min-height: 13px;
+    margin: 1px 0 3px;
+    color: #64748b;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 13px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 .les-card-action-btn,
 .les-card-actions .product-buy-button,
 .les-card-actions .product-more-info {

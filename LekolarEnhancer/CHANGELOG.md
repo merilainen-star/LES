@@ -1,5 +1,9 @@
 # What's new
 
+## v1.31 - 2026-06-08
+
+- **Search card item numbers** now appear in a small line under each product name and above the description. Hovering a result card resolves missing or configured item numbers from the product page, and the compact action toolbar keeps a stable vertical position across one-, two-, and three-line names.
+
 ## v1.30 — 2026-05-22
 
 - **Cart quotation export** — PPT and CSV buttons appear in the mini-cart flyout above the checkout button whenever the cart contains items. Clicking PPT downloads one PowerPoint deck with one product-card slide per cart line, using the same slide layout as the product-page PPT export. Clicking CSV downloads a semicolon-delimited file pre-formatted for the Microsoft Dynamics 365 CE mass-import template: article number is split at the dash into *Product number* and *Product configuration*, and the *Existing Product* key is constructed as `<base><config><company>` (e.g. `3097296U90BF2`). Company code is detected automatically from the site domain (`.fi` → `BF2`, `.no` → `BNO`, `.dk` → `BDK`, default → `BSE`).
