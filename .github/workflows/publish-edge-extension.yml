@@ -146,6 +146,24 @@ jobs:
             exit 1
           fi
 
+      - name: Check Edge publishing secrets
+        env:
+          EDGE_API_KEY: ${{ secrets.EDGE_API_KEY }}
+          EDGE_CLIENT_ID: ${{ secrets.EDGE_CLIENT_ID }}
+          EDGE_PRODUCT_ID: ${{ secrets.EDGE_PRODUCT_ID }}
+        run: |
+          set -euo pipefail
+          missing=0
+          for name in EDGE_API_KEY EDGE_CLIENT_ID EDGE_PRODUCT_ID; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "::error title=Missing Edge publishing secret::$name is not configured."
+              missing=1
+            fi
+          done
+          if [[ "$missing" -ne 0 ]]; then
+            exit 1
+          fi
+
       - name: Upload package to Edge
         id: upload
         env:
