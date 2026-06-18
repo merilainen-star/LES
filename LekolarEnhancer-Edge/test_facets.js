@@ -1,1 +1,0 @@
-fetch('https://www.lekolar.fi/verkkokauppa/kaluste-sisustusvalikoima/tuolit-jakkarat/lastentuolit/').then(r=>r.text()).then(t=>{ const matches = t.match(/facet=([^&"''<>]+)/g); if(matches) console.log(Array.from(new Set(matches)).join('\n')); else console.log('no facets found'); })
