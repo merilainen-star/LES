@@ -135,8 +135,9 @@ The background worker blocks `lesAiSearch`, `lesAiTestKey`, and `lesTranslateTex
 
 ## Installation
 
+- For Firefox releases, use Mozilla Add-ons: <https://addons.mozilla.org/en-US/developers/addon/778ccbb63fa64c838515/edit>.
 - For Edge releases, use Microsoft Edge Add-ons: <https://microsoftedge.microsoft.com/addons/detail/poiadopjpbekbageflcbghabcidpbjhj>.
-- Load as an unpacked extension in Edge.
+- Load as a temporary add-on in `about:debugging` (Firefox) or as an unpacked extension in Edge.
 - Core copy, browsing, notes, PPT, omnibox, and SharePoint features work on matching domains after install. AI Search and translation require the user to enable external services consent in Settings.
 
 ## Release Packaging

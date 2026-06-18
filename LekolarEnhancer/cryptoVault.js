@@ -134,10 +134,7 @@ async function lesVaultGetKeyMeta(name) {
 
 const LES_VAULT_API = { lesVaultSetKey, lesVaultGetKey, lesVaultHasKey, lesVaultGetKeyMeta };
 
-const LES_VAULT_GLOBAL =
-    typeof globalThis !== 'undefined'
-        ? globalThis
-        : (typeof self !== 'undefined' ? self : (typeof window !== 'undefined' ? window : null));
+const LES_VAULT_GLOBAL = globalThis;
 
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = LES_VAULT_API;

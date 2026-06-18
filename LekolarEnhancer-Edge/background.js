@@ -321,16 +321,13 @@ async function probeSharePointEntitlement(probeUrl) {
             checkedAt: Date.now()
         };
     }
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), SHAREPOINT_REQUEST_TIMEOUT_MS);
-
     try {
         const response = await fetch(targetUrl, {
             method: 'GET',
             credentials: 'include',
             cache: 'no-store',
             redirect: 'follow',
-            signal: controller.signal
+            signal: AbortSignal.timeout(SHAREPOINT_REQUEST_TIMEOUT_MS)
         });
 
         const body = await response.text();
@@ -345,7 +342,7 @@ async function probeSharePointEntitlement(probeUrl) {
             checkedAt: Date.now()
         };
     } catch (error) {
-        const timedOut = error && error.name === 'AbortError';
+        const timedOut = error && error.name === 'TimeoutError';
         return {
             status: 'error',
             entitled: false,
@@ -353,8 +350,6 @@ async function probeSharePointEntitlement(probeUrl) {
             error: timedOut ? 'timeout' : (error && error.message) ? error.message : String(error),
             checkedAt: Date.now()
         };
-    } finally {
-        clearTimeout(timeoutId);
     }
 }
 
@@ -367,16 +362,13 @@ async function fetchRemoteHtml(targetUrl) {
         };
     }
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 12000);
-
     try {
         const response = await fetch(targetUrl, {
             method: 'GET',
             credentials: 'omit',
             cache: 'no-store',
             redirect: 'follow',
-            signal: controller.signal
+            signal: AbortSignal.timeout(12000)
         });
 
         if (!response.ok) {
@@ -398,24 +390,20 @@ async function fetchRemoteHtml(targetUrl) {
     } catch (error) {
         return {
             ok: false,
-            error: (error && error.name === 'AbortError') ? 'timeout' : ((error && error.message) ? error.message : String(error)),
+            error: (error && error.name === 'TimeoutError') ? 'timeout' : ((error && error.message) ? error.message : String(error)),
             url: targetUrl
         };
-    } finally {
-        clearTimeout(timeoutId);
     }
 }
 
 async function translateChunkViaMyMemory(chunk, source, target) {
     const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(chunk)}&langpair=${encodeURIComponent(source)}|${encodeURIComponent(target)}`;
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 12000);
     try {
         const response = await fetch(url, {
             method: 'GET',
             cache: 'no-store',
             redirect: 'follow',
-            signal: controller.signal
+            signal: AbortSignal.timeout(12000)
         });
         if (!response.ok) {
             return { ok: false, error: `translation_http_${response.status}` };
@@ -431,10 +419,8 @@ async function translateChunkViaMyMemory(chunk, source, target) {
     } catch (error) {
         return {
             ok: false,
-            error: (error && error.name === 'AbortError') ? 'translation_timeout' : ((error && error.message) ? error.message : String(error))
+            error: (error && error.name === 'TimeoutError') ? 'translation_timeout' : ((error && error.message) ? error.message : String(error))
         };
-    } finally {
-        clearTimeout(timeoutId);
     }
 }
 
@@ -515,9 +501,7 @@ function lesCreateProductCardDeckFileName(fileName) {
 }
 
 function lesGetPptxGenConstructor() {
-    const root = typeof globalThis !== 'undefined'
-        ? globalThis
-        : (typeof window !== 'undefined' ? window : self);
+    const root = globalThis;
     let ctor = root.PptxGenJS || root.pptxgen || root.pptxgenjs;
     if (!ctor && typeof window !== 'undefined') {
         ctor = window.PptxGenJS || window.pptxgen || window.pptxgenjs;

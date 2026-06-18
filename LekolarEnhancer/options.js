@@ -401,7 +401,14 @@ function lesRenderTokens(card, fmt) {
         chip.draggable = true;
         chip.dataset.idx = String(idx);
 
-        if (token.type === 'literal') {
+        if (token.type === 'literal' && token.value === '\t') {
+            // Tab literals are not meaningfully editable in a text input, so show
+            // a readable static marker instead. The stored value stays "\t".
+            const txt = document.createElement('span');
+            txt.className = 'token-chip-text';
+            txt.textContent = '⇥ Tab';
+            chip.appendChild(txt);
+        } else if (token.type === 'literal') {
             const inp = document.createElement('input');
             inp.type = 'text';
             inp.className = 'token-edit';
@@ -476,7 +483,19 @@ function lesRenderTokens(card, fmt) {
 }
 
 function lesSampleContext(slot) {
-    return { number: '12345', name: 'Activity Table 80x60', url: 'https://www.lekolar.fi/p/12345', value: '12345' };
+    return {
+        number: '148278-3084',
+        item: '148278',
+        config: '3084',
+        name: 'Activity Table 80x60',
+        url: 'https://www.lekolar.fi/p/148278',
+        value: '148278-3084'
+    };
+}
+
+// Make whitespace separators visible in the preview without altering the copied value.
+function lesPreviewVisibleWhitespace(s) {
+    return String(s == null ? '' : s).replace(/\t/g, ' ⇥ ').replace(/\n/g, ' ↵ ');
 }
 
 function lesRenderPreview(card, fmt) {
@@ -485,9 +504,9 @@ function lesRenderPreview(card, fmt) {
     const txt = lesRenderCopyFormat(fmt, ctx);
     const out = card.querySelector('[data-format-preview]');
     if (fmt.asLink && ctx.url) {
-        lesReplaceChildren(out, lesCreateSafeLink(ctx.url, txt || '(empty)'));
+        lesReplaceChildren(out, lesCreateSafeLink(ctx.url, lesPreviewVisibleWhitespace(txt) || '(empty)'));
     } else {
-        out.textContent = txt || '(empty)';
+        out.textContent = lesPreviewVisibleWhitespace(txt) || '(empty)';
     }
 }
 
@@ -534,6 +553,15 @@ function lesWireFormatBuilder() {
             lesRenderPreview(card, lesSettings.copyFormats[slot]);
             lesPersistFormat(slot);
         });
+        const tabBtn = card.querySelector('[data-add-tab]');
+        if (tabBtn) {
+            tabBtn.addEventListener('click', () => {
+                lesSettings.copyFormats[slot].tokens.push({ type: 'literal', value: '\t' });
+                lesRenderTokens(card, lesSettings.copyFormats[slot]);
+                lesRenderPreview(card, lesSettings.copyFormats[slot]);
+                lesPersistFormat(slot);
+            });
+        }
     });
 
     document.getElementById('resetFormatsBtn').addEventListener('click', () => {

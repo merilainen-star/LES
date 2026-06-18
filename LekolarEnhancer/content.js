@@ -146,7 +146,7 @@ const FALLBACK_SPEC_FACET_MAP = {
 };
 
 function buildSpecSearchUrl(baseUrl, query, filters = {}) {
-    const globalScope = typeof globalThis !== 'undefined' ? globalThis : window;
+    const globalScope = globalThis;
     if (typeof globalScope.buildLekolarSearchUrl === 'function') {
         return globalScope.buildLekolarSearchUrl(baseUrl, query, filters);
     }
@@ -382,6 +382,14 @@ function extractBaseItemNumber(rawNumber) {
     const match = cleaned.match(/\d+(?:-\d+)?/);
     if (!match) return null;
     return match[0].split('-')[0];
+}
+
+// The config/variant part after the first hyphen (e.g. "148278-3084" -> "3084").
+function extractConfigNumber(rawNumber) {
+    if (!rawNumber) return null;
+    const cleaned = String(rawNumber).trim().replace(/\s+/g, '');
+    const match = cleaned.match(/(\d+)-(\d+)/);
+    return match ? match[2] : null;
 }
 
 function getMainProductNumber() {
@@ -950,7 +958,11 @@ function createCopyButton(textGetter, type, options = {}) {
         const name = context.name || getProductName();
         const number = context.number || ((type === 'number' && ownValue) ? ownValue : getProductNumber());
         const url = context.url || window.location.href;
-        const ctx = { number, name, url, value: ownValue };
+        const ctx = {
+            number, name, url, value: ownValue,
+            item: extractBaseItemNumber(number) || '',
+            config: extractConfigNumber(number) || ''
+        };
 
         const renderFn = (typeof lesRenderCopyFormat === 'function') ? lesRenderCopyFormat : null;
         let plainText = (fmt && renderFn) ? renderFn(fmt, ctx) : '';
@@ -1819,9 +1831,7 @@ async function hydrateProductCardVisualAssets(product) {
 }
 
 function getPptxGenConstructor() {
-    const root = typeof globalThis !== 'undefined'
-        ? globalThis
-        : (typeof window !== 'undefined' ? window : self);
+    const root = globalThis;
     let ctor = root.PptxGenJS || root.pptxgen || root.pptxgenjs;
     if (!ctor && typeof window !== 'undefined') {
         ctor = window.PptxGenJS || window.pptxgen || window.pptxgenjs;
@@ -7645,11 +7655,7 @@ async function loadNextPage(gridContainer, page, debugElement) {
     const nextUrl = currentUrl.toString();
 
     try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout
-
-        const response = await fetch(nextUrl, { signal: controller.signal });
-        clearTimeout(timeoutId);
+        const response = await fetch(nextUrl, { signal: AbortSignal.timeout(10000) }); // 10s timeout
 
         if (!response.ok) return { success: false, message: 'Server error: ' + response.status };
 
@@ -7759,11 +7765,7 @@ async function fetchProductNumberDirect(url) {
     if (fetchedProducts.has(url)) return fetchedProducts.get(url);
 
     try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 8000);
-
-        const response = await fetch(url, { signal: controller.signal });
-        clearTimeout(timeoutId);
+        const response = await fetch(url, { signal: AbortSignal.timeout(8000) });
 
         const text = await response.text();
         const parser = new DOMParser();

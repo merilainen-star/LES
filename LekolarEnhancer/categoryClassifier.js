@@ -74,10 +74,7 @@ function lesClassifyCategory(text) {
 
 const LES_CLASSIFIER_API = { lesClassifyCategory };
 
-const LES_CLASSIFIER_GLOBAL =
-    typeof globalThis !== 'undefined'
-        ? globalThis
-        : (typeof self !== 'undefined' ? self : (typeof window !== 'undefined' ? window : null));
+const LES_CLASSIFIER_GLOBAL = globalThis;
 
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = LES_CLASSIFIER_API;

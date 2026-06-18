@@ -35,6 +35,7 @@ $filesToCopy = @(
     "searchUtils.js",
     "style.css",
     "logo.png",
+    "assets",
     "CHANGELOG.md",
     "README.md"
 )

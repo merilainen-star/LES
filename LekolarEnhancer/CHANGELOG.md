@@ -1,5 +1,9 @@
 # What's new
 
+## v1.32 - 2026-06-09
+
+- **Tab-separated copy formats** — the copy-format editor adds `{item}` and `{config}` tokens (the parts before and after the dash in a code like `148278-3084`) plus a one-click **Tab ⇥** separator button. Compose a format such as `{item} ⇥ {config}` on any modifier slot and a single Ctrl+V drops the item and config numbers into adjacent Excel cells. The live preview shows tabs as a visible ⇥ marker.
+
 ## v1.31 - 2026-06-08
 
 - **Search card item numbers** now appear in a small line under each product name and above the description. Hovering a result card resolves missing or configured item numbers from the product page, and the compact action toolbar keeps a stable vertical position across one-, two-, and three-line names.

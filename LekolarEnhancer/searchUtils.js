@@ -92,10 +92,7 @@ function buildLekolarSearchUrl(baseUrl, query, filters = {}) {
 }
 
 // Export for module usage, and expose helpers on whichever global scope exists.
-const SEARCH_UTILS_GLOBAL =
-    typeof globalThis !== 'undefined'
-        ? globalThis
-        : (typeof self !== 'undefined' ? self : (typeof window !== 'undefined' ? window : null));
+const SEARCH_UTILS_GLOBAL = globalThis;
 
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = { buildLekolarSearchUrl, PIM_TO_FACET_MAP, NUMERIC_FACET_KEYS };

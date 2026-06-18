@@ -25,6 +25,7 @@ const sharedFiles = [
   'aiProviders.js',
   'style.css',
   'logo.png',
+  'assets',
   'README.md',
   'CHANGELOG.md',
   'icons',

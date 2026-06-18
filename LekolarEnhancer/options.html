@@ -160,6 +160,9 @@
         <p class="panel-sub">
           Each format slot is bound to a modifier-key combo on the copy buttons. Drag tokens to reorder,
           click ✕ to delete, and use “+ Token” / “+ Text” to add. Live preview updates as you go.
+          <br><strong>{number}</strong> is the full code (e.g. 148278-3084); <strong>{item}</strong> and
+          <strong>{config}</strong> are the parts before and after the dash. Use <strong>+ Tab ⇥</strong>
+          to separate fields so they paste into adjacent Excel cells (e.g. {item} ⇥ {config}).
         </p>
 
         <div class="card">
@@ -200,8 +203,11 @@
               <button type="button" class="primary-btn secondary-btn small-btn" data-add-token="number">+ {number}</button>
               <button type="button" class="primary-btn secondary-btn small-btn" data-add-token="name">+ {name}</button>
               <button type="button" class="primary-btn secondary-btn small-btn" data-add-token="url">+ {url}</button>
+              <button type="button" class="primary-btn secondary-btn small-btn" data-add-token="item">+ {item}</button>
+              <button type="button" class="primary-btn secondary-btn small-btn" data-add-token="config">+ {config}</button>
               <button type="button" class="primary-btn secondary-btn small-btn" data-add-token="value">+ {value}</button>
               <button type="button" class="primary-btn small-btn" data-add-literal>+ Text…</button>
+              <button type="button" class="primary-btn small-btn" data-add-tab>+ Tab ⇥</button>
             </div>
             <label class="toggle-row inline-toggle">
               <span class="toggle-label small-label">Copy as link (HTML)</span>
@@ -229,8 +235,11 @@
               <button type="button" class="primary-btn secondary-btn small-btn" data-add-token="number">+ {number}</button>
               <button type="button" class="primary-btn secondary-btn small-btn" data-add-token="name">+ {name}</button>
               <button type="button" class="primary-btn secondary-btn small-btn" data-add-token="url">+ {url}</button>
+              <button type="button" class="primary-btn secondary-btn small-btn" data-add-token="item">+ {item}</button>
+              <button type="button" class="primary-btn secondary-btn small-btn" data-add-token="config">+ {config}</button>
               <button type="button" class="primary-btn secondary-btn small-btn" data-add-token="value">+ {value}</button>
               <button type="button" class="primary-btn small-btn" data-add-literal>+ Text…</button>
+              <button type="button" class="primary-btn small-btn" data-add-tab>+ Tab ⇥</button>
             </div>
             <label class="toggle-row inline-toggle">
               <span class="toggle-label small-label">Copy as link (HTML)</span>
@@ -258,8 +267,11 @@
               <button type="button" class="primary-btn secondary-btn small-btn" data-add-token="number">+ {number}</button>
               <button type="button" class="primary-btn secondary-btn small-btn" data-add-token="name">+ {name}</button>
               <button type="button" class="primary-btn secondary-btn small-btn" data-add-token="url">+ {url}</button>
+              <button type="button" class="primary-btn secondary-btn small-btn" data-add-token="item">+ {item}</button>
+              <button type="button" class="primary-btn secondary-btn small-btn" data-add-token="config">+ {config}</button>
               <button type="button" class="primary-btn secondary-btn small-btn" data-add-token="value">+ {value}</button>
               <button type="button" class="primary-btn small-btn" data-add-literal>+ Text…</button>
+              <button type="button" class="primary-btn small-btn" data-add-tab>+ Tab ⇥</button>
             </div>
             <label class="toggle-row inline-toggle">
               <span class="toggle-label small-label">Copy as link (HTML)</span>

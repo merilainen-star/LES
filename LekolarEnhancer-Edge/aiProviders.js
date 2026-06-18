@@ -17,10 +17,8 @@ const LES_AI_ENDPOINTS = {
 const LES_AI_REQUEST_TIMEOUT_MS = 15000;
 
 function lesAiFetchWithTimeout(url, init, timeoutMs) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs || LES_AI_REQUEST_TIMEOUT_MS);
-    return fetch(url, { ...init, signal: controller.signal })
-        .finally(() => clearTimeout(timer));
+    const signal = AbortSignal.timeout(timeoutMs || LES_AI_REQUEST_TIMEOUT_MS);
+    return fetch(url, { ...init, signal });
 }
 
 function lesAiParseJsonStrict(text) {
@@ -184,10 +182,7 @@ const LES_AI_PROVIDERS_API = {
     LES_AI_DEFAULT_MODELS
 };
 
-const LES_AI_PROVIDERS_GLOBAL =
-    typeof globalThis !== 'undefined'
-        ? globalThis
-        : (typeof self !== 'undefined' ? self : (typeof window !== 'undefined' ? window : null));
+const LES_AI_PROVIDERS_GLOBAL = globalThis;
 
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = LES_AI_PROVIDERS_API;

@@ -1125,10 +1125,7 @@ const LES_FACET_VOCABULARY = {
     }
 };
 
-const LES_FACET_VOCABULARY_GLOBAL =
-    typeof globalThis !== 'undefined'
-        ? globalThis
-        : (typeof self !== 'undefined' ? self : (typeof window !== 'undefined' ? window : null));
+const LES_FACET_VOCABULARY_GLOBAL = globalThis;
 
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = { LES_FACET_VOCABULARY };

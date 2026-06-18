@@ -101,6 +101,12 @@ The extension injects utility buttons directly into the product page DOM to faci
 - **Translation**: Optional helper that sends selected/source text to MyMemory only after the user enables external services consent.
 - **API keys**: Stored encrypted in local extension storage and omitted from settings backup/export files.
 
+**13. Configurable Copy Formats**
+
+- **Location**: Settings page, copy-format editor. Each format slot is bound to a modifier-key combo on the copy buttons.
+- **Tokens**: Compose formats from `{number}` (full code, e.g. `148278-3084`), `{name}`, `{url}`, `{value}`, and `{item}` / `{config}` (the parts before and after the dash in a code like `148278-3084`).
+- **Tab separator**: A one-click **Tab ⇥** button inserts a tab so a format such as `{item} ⇥ {config}` pastes the item and config numbers into adjacent Excel cells with a single Ctrl+V. The live preview shows tabs and newlines as visible markers.
+
 ## External Services and Consent
 
 External services are off by default. The General settings tab includes an `External services` consent toggle explaining that AI Search sends the typed query to the selected AI provider, and Swedish source translation sends source text to MyMemory.

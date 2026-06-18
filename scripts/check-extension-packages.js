@@ -52,6 +52,10 @@ function collectManifestRefs(manifest, pkg) {
   for (const icon of Object.values(manifest.icons || {})) refs.add(icon);
   if (manifest.options_ui && manifest.options_ui.page) refs.add(manifest.options_ui.page);
 
+  for (const resourceGroup of manifest.web_accessible_resources || []) {
+    for (const resource of resourceGroup.resources || []) refs.add(resource);
+  }
+
   if (manifest.background) {
     if (manifest.background.service_worker) refs.add(manifest.background.service_worker);
     for (const script of manifest.background.scripts || []) refs.add(script);

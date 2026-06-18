@@ -198,10 +198,7 @@ function lesAiValidateExtraction(raw, map, vocabulary) {
 
 const LES_AI_PROMPT_API = { lesAiBuildSystemPrompt, lesAiValidateExtraction, lesAiNormalizeValue, lesAiParseNumericRange };
 
-const LES_AI_PROMPT_GLOBAL =
-    typeof globalThis !== 'undefined'
-        ? globalThis
-        : (typeof self !== 'undefined' ? self : (typeof window !== 'undefined' ? window : null));
+const LES_AI_PROMPT_GLOBAL = globalThis;
 
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = LES_AI_PROMPT_API;
