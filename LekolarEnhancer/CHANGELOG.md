@@ -1,6 +1,6 @@
 # What's new
 
-## Unreleased
+## v1.33 - 2026-06-26
 
 - **Search card copy links** let the result-card copy button share a product directly from search or category lists: normal click copies the item number, and configured modifier-key copy formats match the product-page copy buttons, including copy-as-link formats.
 - Removed the redundant copy button next to the product title on the product page (the "find similar products" search button remains).
