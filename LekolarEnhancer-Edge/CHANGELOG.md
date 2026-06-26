@@ -1,5 +1,10 @@
 # What's new
 
+## Unreleased
+
+- **Search card copy links** let the result-card copy button share a product directly from search or category lists: normal click copies the item number, and configured modifier-key copy formats match the product-page copy buttons, including copy-as-link formats.
+- Removed the redundant copy button next to the product title on the product page (the "find similar products" search button remains).
+
 ## v1.32 - 2026-06-09
 
 - **Tab-separated copy formats** — the copy-format editor adds `{item}` and `{config}` tokens (the parts before and after the dash in a code like `148278-3084`) plus a one-click **Tab ⇥** separator button. Compose a format such as `{item} ⇥ {config}` on any modifier slot and a single Ctrl+V drops the item and config numbers into adjacent Excel cells. The live preview shows tabs as a visible ⇥ marker.

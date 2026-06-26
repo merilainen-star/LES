@@ -89,6 +89,7 @@ The extension injects utility buttons directly into the product page DOM to faci
 - **Location**: Category and search result product cards, directly below the product name and above the description.
 - **Action**: Shows a compact item-number line and keeps the injected action toolbar aligned even when product names wrap to different line counts.
 - **Variant handling**: On card hover, missing or configured item numbers are resolved from the linked product page and reused by the copy button.
+- **Copy shortcut**: Click the card copy button to copy the item number; configured modifier-key copy formats, including copy-as-link formats, work the same way as product-page copy buttons so results can be shared without opening the product page.
 
 **11. Omnibox and SharePoint Search**
 

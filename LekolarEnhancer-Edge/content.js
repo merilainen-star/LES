@@ -718,13 +718,8 @@ function ensureProductNameSearchControl(h1) {
         controlGroup.className = 'les-product-name-actions';
     }
 
-    let copyButton = h1.querySelector('.lekolar-copy-btn[data-type="name"]');
-    if (!copyButton) {
-        copyButton = createCopyButton(() => getProductName(), 'name');
-    }
-    if (copyButton && copyButton.parentElement !== controlGroup) {
-        controlGroup.appendChild(copyButton);
-    }
+    const existingNameCopyButton = h1.querySelector('.lekolar-copy-btn[data-type="name"]');
+    if (existingNameCopyButton) existingNameCopyButton.remove();
 
     let button = h1.querySelector('.les-product-name-search-btn');
     if (!button) {
@@ -3636,6 +3631,33 @@ function ensureCardCartProxy(card, toolbar) {
     insertCardAction(toolbar, button, 40);
 }
 
+function keepCardToolbarInteractive(toolbar) {
+    if (!toolbar || toolbar.dataset.lesInteractiveBound === 'true') return;
+    toolbar.dataset.lesInteractiveBound = 'true';
+    const isolatedEvents = [
+        'pointerover', 'pointerenter', 'pointermove', 'pointerout', 'pointerleave',
+        'mouseover', 'mouseenter', 'mousemove', 'mouseout', 'mouseleave',
+        'pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click', 'dblclick'
+    ];
+    isolatedEvents.forEach(type => {
+        toolbar.addEventListener(type, event => {
+            event.stopPropagation();
+        });
+    });
+}
+
+function moveToolbarOutOfProductLink(card, toolbar) {
+    if (!card || !toolbar || !toolbar.closest) return;
+    const link = toolbar.closest('a[href*="/verkkokauppa/"], a[href*="/sortiment/"]');
+    if (!link) return;
+    toolbar.classList.add('les-card-actions-link-island');
+    if (link === card) {
+        card.classList.add('les-card-link-root-actions');
+        return;
+    }
+    if (!card.contains(link) || !link.parentElement) return;
+    link.insertAdjacentElement('afterend', toolbar);
+}
 function ensureCardActionToolbar(card) {
     if (!card || !isListPage()) return null;
 
@@ -3659,6 +3681,8 @@ function ensureCardActionToolbar(card) {
     }
 
     card.classList.add('les-compact-card-actions');
+    moveToolbarOutOfProductLink(card, toolbar);
+    keepCardToolbarInteractive(toolbar);
     ensureCardProductNumberLine(card);
     ensureCardCartProxy(card, toolbar);
 
@@ -3830,7 +3854,7 @@ function setCardProductNumber(card, number, button) {
     if (button) {
         button.dataset.value = cleanNumber;
         button.classList.remove('is-loading');
-        button.title = `item ${cleanNumber}`;
+        button.title = `Copy item ${cleanNumber}`;
         button.setAttribute('aria-label', `Copy item ${cleanNumber}`);
     }
 }
@@ -3878,11 +3902,9 @@ function ensureCardCopyAction(card) {
         button.setAttribute('aria-label', 'Copy item number');
         button.appendChild(createCopySvg(16));
 
-        const warmUp = () => {
+        button.addEventListener('focus', () => {
             if (!button.dataset.value) resolveCardProductNumber(card, button);
-        };
-        button.addEventListener('mouseenter', warmUp);
-        button.addEventListener('focus', warmUp);
+        });
         button.addEventListener('click', async (event) => {
             event.preventDefault();
             event.stopPropagation();
@@ -3893,13 +3915,45 @@ function ensureCardCopyAction(card) {
                 return;
             }
 
-            const text = event[currentSettings.secondaryModifierKey] && getProductCardName(card)
-                ? `${number} ${getProductCardName(card)}`
-                : number;
+            const url = getProductCardUrl(card) || window.location.href;
+            const name = getProductCardName(card) || '';
+            const formats = (currentSettings && currentSettings.copyFormats) || (typeof LES_DEFAULT_FORMATS !== 'undefined' ? LES_DEFAULT_FORMATS : {});
+            const isPrimary = currentSettings.modifierKey && currentSettings.modifierKey !== 'none' && event[currentSettings.modifierKey];
+            const isSecondary = !isPrimary && currentSettings.secondaryModifierKey && currentSettings.secondaryModifierKey !== 'none' && event[currentSettings.secondaryModifierKey];
+            const slot = isPrimary ? 'primary' : isSecondary ? 'secondary' : 'default';
+            const fmt = formats[slot] || (typeof LES_DEFAULT_FORMATS !== 'undefined' ? LES_DEFAULT_FORMATS[slot] : null);
+            const ctx = {
+                number,
+                name,
+                url,
+                value: number,
+                item: extractBaseItemNumber(number) || '',
+                config: extractConfigNumber(number) || ''
+            };
+            const renderFn = (typeof lesRenderCopyFormat === 'function') ? lesRenderCopyFormat : null;
+            let text = (fmt && renderFn) ? renderFn(fmt, ctx) : '';
+            if (!text) text = number;
+            const copyAsLink = !!(fmt && fmt.asLink) && !!url;
 
             try {
-                await navigator.clipboard.writeText(text);
-                showCompareToast('Item number copied.');
+                if (copyAsLink) {
+                    const escFn = (typeof lesEscapeHtmlForCopy === 'function') ? lesEscapeHtmlForCopy : escapeHtml;
+                    const htmlText = '<a href="' + escFn(url) + '">' + escFn(text) + '</a>';
+                    try {
+                        const clipboardItem = new ClipboardItem({
+                            'text/plain': new Blob([text], { type: 'text/plain' }),
+                            'text/html': new Blob([htmlText], { type: 'text/html' })
+                        });
+                        await navigator.clipboard.write([clipboardItem]);
+                    } catch (richError) {
+                        console.warn('LES: Failed to copy rich card link:', richError);
+                        await navigator.clipboard.writeText(text);
+                    }
+                    showCompareToast('Item link copied.');
+                } else {
+                    await navigator.clipboard.writeText(text);
+                    showCompareToast('Item number copied.');
+                }
             } catch (error) {
                 console.error('LES: Failed to copy card product number', error);
             }
@@ -3910,7 +3964,6 @@ function ensureCardCopyAction(card) {
     if (existing) setCardProductNumber(card, existing, button);
     insertCardAction(toolbar, button, 10);
 }
-
 function extractComparisonSymbolLabels(root) {
     const labels = [];
     root.querySelectorAll('.symbols img, .symbols [title], .product-flags img, .product-flags [title], [class*="product-flag"] img').forEach(el => {

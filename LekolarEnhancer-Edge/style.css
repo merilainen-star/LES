@@ -1384,9 +1384,22 @@ html.les-theme-black .les-product-tree-child-count {
     }
 }
 
+.les-compact-card-actions {
+    position: relative !important;
+    z-index: 2;
+}
+
+.les-compact-card-actions .les-card-actions,
+.les-compact-card-actions .les-card-actions * {
+    pointer-events: auto !important;
+}
+
 /* --- Product Comparison --- */
 
 .les-card-actions {
+    position: relative !important;
+    z-index: 2147483646 !important;
+    isolation: isolate;
     display: inline-flex;
     align-items: center;
     gap: 4px;
@@ -1436,6 +1449,12 @@ html.les-theme-black .les-product-tree-child-count {
     color: #1f2937 !important;
     box-shadow: none !important;
     box-sizing: border-box !important;
+    position: relative !important;
+    z-index: 2147483647 !important;
+    pointer-events: auto !important;
+    isolation: isolate;
+    touch-action: manipulation;
+    user-select: none;
     cursor: pointer;
     line-height: 1 !important;
     text-decoration: none !important;
@@ -1456,6 +1475,13 @@ html.les-theme-black .les-product-tree-child-count {
     width: 15px;
     height: 15px;
     flex-shrink: 0;
+    pointer-events: none;
+}
+
+.les-card-action-btn svg *,
+.les-card-actions .product-buy-button svg *,
+.les-card-actions .product-more-info svg * {
+    pointer-events: none;
 }
 
 .les-compact-card-actions .price-buy-info .buy-info,
