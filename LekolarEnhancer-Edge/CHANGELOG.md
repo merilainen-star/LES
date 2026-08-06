@@ -2,6 +2,7 @@
 
 ## v1.33 - 2026-06-26
 
+- Product-page number copy now preserves alphanumeric variant suffixes from the selected article number, such as `30763-609U96`, instead of truncating at `30763-609`.
 - **Search card copy links** let the result-card copy button share a product directly from search or category lists: normal click copies the item number, and configured modifier-key copy formats match the product-page copy buttons, including copy-as-link formats.
 - Removed the redundant copy button next to the product title on the product page (the "find similar products" search button remains).
 

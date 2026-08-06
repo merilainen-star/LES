@@ -25,7 +25,7 @@ The extension injects utility buttons directly into the product page DOM to faci
 **1. Copy Product Number**
 
 - **Location**: Injected next to the product number (e.g., "Tuotenro: 12345").
-- **Action**: Copies the product number to the clipboard.
+- **Action**: Copies the selected product article number to the clipboard, including alphanumeric configuration suffixes from the active variant (for example `30763-609U96`).
 - **Icon**: Standard copy icon.
 
 **2. Copy Product Name**

@@ -336,7 +336,22 @@ async function resolveRestrictedFeatureAccess(forceRefresh = false) {
     }
 }
 
+function extractArticleNumberFromLabelText(text) {
+    const match = String(text || '').trim().match(/(?:Tuotenro|Art\.nr|Varenr)[\.\s:]*\s*([0-9][0-9A-Za-z]*(?:-[0-9A-Za-z]+)*)/i);
+    return match ? match[1] : null;
+}
+
+function extractArticleNumberFromLeadingText(text) {
+    const match = String(text || '').trim().match(/^:?\s*([0-9][0-9A-Za-z]*(?:-[0-9A-Za-z]+)*)/);
+    return match ? match[1] : null;
+}
+
 function getProductNumber() {
+    const selectedArticleNumber = getSelectedVariantArticleNumber();
+    if (selectedArticleNumber) {
+        return selectedArticleNumber;
+    }
+
     const existingBtn = document.querySelector('.lekolar-copy-btn[data-type="number"]');
     if (existingBtn && existingBtn.dataset.value) {
         return existingBtn.dataset.value;
@@ -357,8 +372,8 @@ function getProductNumber() {
         for (let i = 0; i < result.snapshotLength; i++) {
             const element = result.snapshotItem(i);
             const text = element.textContent.trim();
-            let match = text.match(/(?:Tuotenro|Art\.nr|Varenr)[\.\s:]*\s*([\d-]+)/i);
-            if (match) return match[1];
+            const articleNumber = extractArticleNumberFromLabelText(text);
+            if (articleNumber) return articleNumber;
 
             let next = element.nextSibling;
             while (next && (next.nodeType === 8 || (next.nodeType === 3 && !next.textContent.trim()))) {
@@ -366,8 +381,8 @@ function getProductNumber() {
             }
             if (next && next.textContent) {
                 const nextText = next.textContent.trim();
-                const numberMatch = nextText.match(/^:?\s*([\d-]+)/);
-                if (numberMatch) return numberMatch[1];
+                const nextArticleNumber = extractArticleNumberFromLeadingText(nextText);
+                if (nextArticleNumber) return nextArticleNumber;
             }
         }
     } catch (e) {
@@ -379,17 +394,17 @@ function getProductNumber() {
 function extractBaseItemNumber(rawNumber) {
     if (!rawNumber) return null;
     const cleaned = String(rawNumber).trim().replace(/\s+/g, '');
-    const match = cleaned.match(/\d+(?:-\d+)?/);
+    const match = cleaned.match(/[0-9][0-9A-Za-z]*(?:-[0-9A-Za-z]+)?/);
     if (!match) return null;
     return match[0].split('-')[0];
 }
 
-// The config/variant part after the first hyphen (e.g. "148278-3084" -> "3084").
+// The config/variant part after the first hyphen (e.g. "30972-96U90" -> "96U90").
 function extractConfigNumber(rawNumber) {
     if (!rawNumber) return null;
     const cleaned = String(rawNumber).trim().replace(/\s+/g, '');
-    const match = cleaned.match(/(\d+)-(\d+)/);
-    return match ? match[2] : null;
+    const dashIndex = cleaned.indexOf('-');
+    return dashIndex >= 0 ? cleaned.slice(dashIndex + 1) : null;
 }
 
 function getMainProductNumber() {
@@ -413,16 +428,16 @@ function getMainProductNumber() {
             for (let i = 0; i < result.snapshotLength; i++) {
                 const element = result.snapshotItem(i);
                 const text = (element.textContent || '').trim();
-                const match = text.match(/(?:Tuotenro|Art\.nr|Varenr)[\.\s:]*\s*([\d-]+)/i);
-                if (match) return match[1];
+                const articleNumber = extractArticleNumberFromLabelText(text);
+                if (articleNumber) return articleNumber;
 
                 let next = element.nextSibling;
                 while (next && (next.nodeType === 8 || (next.nodeType === 3 && !(next.textContent || '').trim()))) {
                     next = next.nextSibling;
                 }
                 if (next && next.textContent) {
-                    const numberMatch = next.textContent.trim().match(/^:?\s*([\d-]+)/);
-                    if (numberMatch) return numberMatch[1];
+                    const nextArticleNumber = extractArticleNumberFromLeadingText(next.textContent);
+                    if (nextArticleNumber) return nextArticleNumber;
                 }
             }
         } catch (e) {
@@ -951,7 +966,8 @@ function createCopyButton(textGetter, type, options = {}) {
 
         const context = typeof getCopyContext === 'function' ? (getCopyContext() || {}) : {};
         const name = context.name || getProductName();
-        const number = context.number || ((type === 'number' && ownValue) ? ownValue : getProductNumber());
+        const pageNumber = getProductNumber();
+        const number = context.number || (type === 'number' ? (pageNumber || ownValue) : pageNumber);
         const url = context.url || window.location.href;
         const ctx = {
             number, name, url, value: ownValue,
@@ -6413,9 +6429,9 @@ function findAndInject() {
                 let target = null;
                 let method = 'append';
 
-                let match = text.match(/(?:Tuotenro|Art\.nr|Varenr)[\.\s:]*\s*([\d-]+)/i);
-                if (match) {
-                    number = match[1];
+                const articleNumber = extractArticleNumberFromLabelText(text);
+                if (articleNumber) {
+                    number = getSelectedVariantArticleNumber() || articleNumber;
                     target = element;
                 } else if (text.match(/Tuotenro|Art\.nr|Varenr/i)) {
                     let next = element.nextSibling;
@@ -6424,9 +6440,9 @@ function findAndInject() {
                     }
                     if (next && next.textContent) {
                         const nextText = next.textContent.trim();
-                        const numberMatch = nextText.match(/^:?\s*([\d-]+)/);
-                        if (numberMatch) {
-                            number = numberMatch[1];
+                        const nextArticleNumber = extractArticleNumberFromLeadingText(nextText);
+                        if (nextArticleNumber) {
+                            number = getSelectedVariantArticleNumber() || nextArticleNumber;
                             if (next.nodeType === 1) target = next;
                             else {
                                 target = next.parentNode;
