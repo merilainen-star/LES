@@ -143,8 +143,72 @@ jobs:
             exit 1
           fi
 
+      - name: Pre-flight - check for in-review submission
+        id: preflight
+        env:
+          EDGE_API_KEY: ${{ secrets.EDGE_API_KEY }}
+          EDGE_CLIENT_ID: ${{ secrets.EDGE_CLIENT_ID }}
+          EDGE_PRODUCT_ID: ${{ secrets.EDGE_PRODUCT_ID }}
+        run: |
+          set -euo pipefail
+
+          manifest_ver="$(python3 -c "import json;print(json.load(open('LekolarEnhancer/manifest.json'))['version'])")"
+          echo "Manifest version: $manifest_ver"
+
+          last_published_body="$(mktemp)"
+          last_published_status="$(
+            curl -sS \
+              -o "$last_published_body" \
+              -w "%{http_code}" \
+              -H "Authorization: ApiKey $EDGE_API_KEY" \
+              -H "X-ClientID: $EDGE_CLIENT_ID" \
+              "https://api.addons.microsoftedge.microsoft.com/v1/products/$EDGE_PRODUCT_ID/submissions/last-published" \
+            )"
+
+          last_published_ver=""
+          if [[ "$last_published_status" == "200" ]]; then
+            last_published_ver="$(python3 -c "import json,sys;d=json.load(sys.stdin);print(((d.get('metadata') or {}).get('version')) or d.get('version') or '')" < "$last_published_body" || echo "")"
+          fi
+          echo "Last-published version: ${last_published_ver:-<unknown>} (HTTP $last_published_status)"
+          rm -f "$last_published_body"
+
+          if [[ -n "$last_published_ver" && "$last_published_ver" == "$manifest_ver" ]]; then
+            echo "::warning::Edge add-on v$manifest_ver is already the last-published version. Skipping upload."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "skip_reason=already-published" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          draft_body="$(mktemp)"
+          draft_status="$(
+            curl -sS \
+              -o "$draft_body" \
+              -w "%{http_code}" \
+              -H "Authorization: ApiKey $EDGE_API_KEY" \
+              -H "X-ClientID: $EDGE_CLIENT_ID" \
+              "https://api.addons.microsoftedge.microsoft.com/v1/products/$EDGE_PRODUCT_ID/submissions/draft" \
+            )"
+          echo "Draft submission HTTP status: $draft_status"
+          if [[ "$draft_status" == "200" ]]; then
+            draft_status_text="$(python3 -c "import json,sys;d=json.load(sys.stdin);print((d.get('status') or '').strip())" < "$draft_body" || echo "")"
+            echo "Draft submission status field: ${draft_status_text:-<empty>}"
+            case "$draft_status_text" in
+              InReview|InProgress|Publishing|Certification|InCertification|Submitted)
+                echo "::warning::Previous Edge submission is still in review (status: $draft_status_text). Skipping upload."
+                echo "skip=true" >> "$GITHUB_OUTPUT"
+                echo "skip_reason=in-review" >> "$GITHUB_OUTPUT"
+                rm -f "$draft_body"
+                exit 0
+                ;;
+            esac
+          fi
+          rm -f "$draft_body"
+
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
       - name: Upload package to Edge
         id: upload
+        if: steps.preflight.outputs.skip != 'true'
         env:
           EDGE_API_KEY: ${{ secrets.EDGE_API_KEY }}
           EDGE_CLIENT_ID: ${{ secrets.EDGE_CLIENT_ID }}
@@ -197,6 +261,8 @@ jobs:
           echo "operation_id=$upload_op_id" >> "$GITHUB_OUTPUT"
 
       - name: Wait for upload
+        id: wait_upload
+        if: steps.preflight.outputs.skip != 'true'
         env:
           EDGE_API_KEY: ${{ secrets.EDGE_API_KEY }}
           EDGE_CLIENT_ID: ${{ secrets.EDGE_CLIENT_ID }}
@@ -238,10 +304,19 @@ jobs:
             fi
 
             if [[ "$status" == "Failed" ]]; then
-              echo "Upload operation failed."
               echo "Upload status response body:"
               cat "$upload_poll_body"
+              # Microsoft's API returns Failed with empty errorCode/errors when a
+              # previous submission is still in review (max ~7 days). Treat that
+              # signature as a soft skip instead of failing the workflow.
+              looks_like_in_review="$(python3 -c "import json,sys;d=json.load(sys.stdin);print('1' if d.get('status')=='Failed' and not d.get('errorCode') and not d.get('errors') else '0')" < "$upload_poll_body" || echo "0")"
               rm -f "$upload_poll_body"
+              if [[ "$looks_like_in_review" == "1" ]]; then
+                echo "::warning::Upload Failed with no errorCode/errors — most likely the previous Edge submission is still in review. Skipping publish."
+                echo "skip=true" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+              echo "Upload operation failed."
               exit 1
             fi
 
@@ -253,6 +328,7 @@ jobs:
 
       - name: Publish submission
         id: publish
+        if: steps.preflight.outputs.skip != 'true' && steps.wait_upload.outputs.skip != 'true'
         env:
           EDGE_API_KEY: ${{ secrets.EDGE_API_KEY }}
           EDGE_CLIENT_ID: ${{ secrets.EDGE_CLIENT_ID }}
@@ -308,6 +384,7 @@ jobs:
           echo "operation_id=$publish_op_id" >> "$GITHUB_OUTPUT"
 
       - name: Wait for publish
+        if: steps.preflight.outputs.skip != 'true' && steps.wait_upload.outputs.skip != 'true'
         env:
           EDGE_API_KEY: ${{ secrets.EDGE_API_KEY }}
           EDGE_CLIENT_ID: ${{ secrets.EDGE_CLIENT_ID }}
