@@ -594,6 +594,208 @@ function createCopyButton(textGetter, type, options = {}) {
     return button;
 }
 
+function flashButtonTooltip(button, label = 'Copied!') {
+    const tooltip = button.querySelector('.tooltip');
+    if (!tooltip) return;
+
+    const originalText = tooltip.innerText;
+    tooltip.innerText = label;
+    tooltip.classList.add('visible');
+    setTimeout(() => {
+        tooltip.innerText = originalText;
+        tooltip.classList.remove('visible');
+    }, 2000);
+}
+
+function getMainProductImageUrl() {
+    const imageLink = document.querySelector(
+        '.product-image-wrapper .js-currentImage, .product-image-wrapper .current-image, .product-image-wrapper .js-productImage'
+    );
+    if (imageLink) {
+        const href = imageLink.getAttribute('href');
+        if (href) return new URL(href, window.location.href).href;
+    }
+
+    const image = document.querySelector('.product-image-wrapper img.product-image, .product-image-wrapper img');
+    if (image) {
+        const src = image.getAttribute('src');
+        if (src) return new URL(src, window.location.href).href;
+    }
+
+    return '';
+}
+
+function getMainProductImageElement() {
+    return document.querySelector(
+        '.product-image-wrapper .js-currentImage img.product-image, .product-image-wrapper .js-currentImage img, ' +
+        '.product-image-wrapper .current-image img.product-image, .product-image-wrapper .current-image img, ' +
+        '.product-image-wrapper img.product-image, .product-image-wrapper img'
+    );
+}
+
+function canvasToBlob(canvas, type = 'image/png', quality) {
+    return new Promise((resolve, reject) => {
+        canvas.toBlob((blob) => {
+            if (blob) resolve(blob);
+            else reject(new Error('Canvas export failed'));
+        }, type, quality);
+    });
+}
+
+async function blobToPngClipboardBlob(blob) {
+    if (!blob || !blob.size) throw new Error('Missing source image blob');
+
+    let bitmap = null;
+    try {
+        bitmap = await createImageBitmap(blob);
+        const canvas = document.createElement('canvas');
+        canvas.width = bitmap.width;
+        canvas.height = bitmap.height;
+
+        const ctx = canvas.getContext('2d');
+        if (!ctx) throw new Error('Canvas 2D context unavailable');
+
+        ctx.drawImage(bitmap, 0, 0);
+        return await canvasToBlob(canvas, 'image/png');
+    } finally {
+        if (bitmap && typeof bitmap.close === 'function') {
+            bitmap.close();
+        }
+    }
+}
+
+async function copyMainProductImageToClipboard() {
+    const imageUrl = getMainProductImageUrl();
+    if (imageUrl && navigator.clipboard && typeof ClipboardItem !== 'undefined') {
+        try {
+            const response = await fetch(imageUrl, { credentials: 'include' });
+            if (response.ok) {
+                const blob = await response.blob();
+                if (blob.size > 0) {
+                    const pngBlob = await blobToPngClipboardBlob(blob);
+                    const item = new ClipboardItem({ 'image/png': pngBlob });
+                    await navigator.clipboard.write([item]);
+                    return true;
+                }
+            }
+        } catch (e) {
+            // Fall back to the rendered preview below.
+        }
+    }
+
+    const image = getMainProductImageElement();
+    if (!image) throw new Error('Missing product image');
+
+    if (typeof image.decode === 'function') {
+        try {
+            await image.decode();
+        } catch (e) {
+            // If the image is already loaded, decode can still reject on some browsers.
+        }
+    }
+
+    const width = image.naturalWidth || image.width;
+    const height = image.naturalHeight || image.height;
+    if (!width || !height) throw new Error('Image has no dimensions yet');
+
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('Canvas 2D context unavailable');
+
+    ctx.drawImage(image, 0, 0, width, height);
+
+    const blob = await canvasToBlob(canvas, 'image/png');
+    if (navigator.clipboard && typeof ClipboardItem !== 'undefined') {
+        const item = new ClipboardItem({ 'image/png': blob });
+        await navigator.clipboard.write([item]);
+        return true;
+    }
+
+    throw new Error('Image clipboard API unavailable');
+}
+
+function ensureProductImageActionButton() {
+    const wrapper = document.querySelector('.product-image-wrapper');
+    if (!wrapper) return null;
+
+    let button = wrapper.querySelector('.les-image-copy-btn');
+    if (button) return button;
+
+    button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'lekolar-copy-btn les-image-copy-btn';
+    button.title = 'Copy product image';
+    button.setAttribute('aria-label', 'Copy product image');
+
+    const svgNS = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(svgNS, 'svg');
+    svg.setAttribute('xmlns', svgNS);
+    svg.setAttribute('width', '16');
+    svg.setAttribute('height', '16');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('fill', 'none');
+    svg.setAttribute('stroke', 'currentColor');
+    svg.setAttribute('stroke-width', '2');
+    svg.setAttribute('stroke-linecap', 'round');
+    svg.setAttribute('stroke-linejoin', 'round');
+
+    const rect1 = document.createElementNS(svgNS, 'rect');
+    rect1.setAttribute('x', '9');
+    rect1.setAttribute('y', '3');
+    rect1.setAttribute('width', '12');
+    rect1.setAttribute('height', '12');
+    rect1.setAttribute('rx', '2');
+    rect1.setAttribute('ry', '2');
+
+    const rect2 = document.createElementNS(svgNS, 'rect');
+    rect2.setAttribute('x', '3');
+    rect2.setAttribute('y', '9');
+    rect2.setAttribute('width', '12');
+    rect2.setAttribute('height', '12');
+    rect2.setAttribute('rx', '2');
+    rect2.setAttribute('ry', '2');
+    rect2.setAttribute('fill', 'white');
+
+    svg.appendChild(rect1);
+    svg.appendChild(rect2);
+
+    const tooltip = document.createElement('span');
+    tooltip.className = 'tooltip';
+    tooltip.textContent = 'Copy image';
+
+    button.appendChild(svg);
+    button.appendChild(tooltip);
+
+    button.addEventListener('click', async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+
+        try {
+            await copyMainProductImageToClipboard();
+            flashButtonTooltip(button, 'Image copied!');
+            return;
+        } catch (error) {
+            console.warn('LES: Failed to copy image blob, falling back to URL:', error);
+        }
+
+        const imageUrl = getMainProductImageUrl();
+        if (!imageUrl) return;
+
+        try {
+            await navigator.clipboard.writeText(imageUrl);
+            flashButtonTooltip(button, 'Image URL copied!');
+        } catch (error) {
+            console.error('LES: Failed to copy image URL:', error);
+        }
+    });
+
+    wrapper.appendChild(button);
+    return button;
+}
+
 function getSwedishReferencePanel() {
     return document.querySelector('.les-sv-reference-panel');
 }
@@ -1011,6 +1213,11 @@ function findAndInject() {
             const btn = createCopyButton(name, 'name');
             h1.appendChild(btn);
         }
+    }
+
+    // 2b. Inject product image copy button
+    if (!document.querySelector('.les-image-copy-btn')) {
+        ensureProductImageActionButton();
     }
 
     // 3. Inject Swedish reference button (product pages only)

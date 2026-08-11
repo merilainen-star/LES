@@ -25,6 +25,26 @@
     /* Subtle hover effect */
 }
 
+.product-image-wrapper {
+    position: relative;
+}
+
+.les-image-copy-btn {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    z-index: 20;
+    margin-left: 0;
+    padding: 6px;
+    background: rgba(255, 255, 255, 0.92);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.14);
+    backdrop-filter: blur(4px);
+}
+
+.les-image-copy-btn:hover {
+    background: rgba(255, 255, 255, 1);
+}
+
 .lekolar-copy-btn svg {
     width: 16px;
     height: 16px;
