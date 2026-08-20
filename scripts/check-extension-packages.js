@@ -19,6 +19,21 @@ const forbiddenNames = new Set([
   'edge-extension.zip'
 ]);
 
+// Hosts the extension only ever navigates to (anchor href / window.open), never fetches.
+// Opening a URL in a tab needs no host permission, so these are exempt from the fetch-host
+// check below, which is deliberately coarse (any https literal in a file that calls fetch).
+const navigationOnlyHosts = new Set([
+  'mediahub.lekolar.com'
+]);
+
+function isNavigationOnlyUrl(url) {
+  try {
+    return navigationOnlyHosts.has(new URL(url).hostname);
+  } catch (_) {
+    return false;
+  }
+}
+
 function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
@@ -114,11 +129,13 @@ function assertFetchHostsCovered(pkg, manifest) {
     const source = fs.readFileSync(file, 'utf8');
     if (!/\bfetch\s*\(/.test(source)) continue;
     for (const match of source.matchAll(/https:\/\/[^\s'"`<>)]+/g)) {
-      urls.add(match[0].replace(/[.,;:]+$/, ''));
+      // Trim template-literal interpolation so the reported URL stays readable.
+      urls.add(match[0].split('${')[0].replace(/[.,;:]+$/, ''));
     }
   }
 
   for (const url of urls) {
+    if (isNavigationOnlyUrl(url)) continue;
     assert(
       hostPermissions.some(permission => permissionCoversUrl(permission, url)),
       `${pkg.name}: ${url} is referenced in JS but not covered by host_permissions`
