@@ -673,7 +673,8 @@ html.les-theme-black .les-spec-search-btn {
 .les-buttons-bar .les-product-card-ppt-btn,
 .les-buttons-bar .les-spec-search-btn,
 .les-buttons-bar .les-sv-reference-btn,
-.les-buttons-bar .lekolar-compliance-btn {
+.les-buttons-bar .lekolar-compliance-btn,
+.les-buttons-bar .les-mediahub-btn {
     display: inline-flex !important;
     align-items: center !important;
     justify-content: center !important;
@@ -701,7 +702,8 @@ html.les-theme-black .les-spec-search-btn {
 .les-buttons-bar .les-product-card-ppt-btn:hover:not(:disabled),
 .les-buttons-bar .les-spec-search-btn:hover,
 .les-buttons-bar .les-sv-reference-btn:hover:not(:disabled),
-.les-buttons-bar .lekolar-compliance-btn:hover {
+.les-buttons-bar .lekolar-compliance-btn:hover,
+.les-buttons-bar .les-mediahub-btn:hover {
     background: #f8fafc !important;
     border-color: #94a3b8 !important;
     color: #111827 !important;
@@ -730,7 +732,8 @@ html.les-theme-black .les-spec-search-btn {
 .les-buttons-bar .les-product-card-ppt-label,
 .les-buttons-bar .les-spec-search-label,
 .les-buttons-bar .les-sv-reference-label,
-.les-buttons-bar .lekolar-compliance-label {
+.les-buttons-bar .lekolar-compliance-label,
+.les-buttons-bar .les-mediahub-label {
     display: none !important;
 }
 
@@ -757,7 +760,9 @@ html.les-theme-black .les-buttons-bar .les-spec-search-btn,
 html.les-theme-dark .les-buttons-bar .les-sv-reference-btn,
 html.les-theme-black .les-buttons-bar .les-sv-reference-btn,
 html.les-theme-dark .les-buttons-bar .lekolar-compliance-btn,
-html.les-theme-black .les-buttons-bar .lekolar-compliance-btn {
+html.les-theme-black .les-buttons-bar .lekolar-compliance-btn,
+html.les-theme-dark .les-buttons-bar .les-mediahub-btn,
+html.les-theme-black .les-buttons-bar .les-mediahub-btn {
     background: #0f172a !important;
     color: #e5e7eb !important;
     border-color: #334155 !important;
@@ -774,7 +779,9 @@ html.les-theme-black .les-buttons-bar .les-spec-search-btn:hover,
 html.les-theme-dark .les-buttons-bar .les-sv-reference-btn:hover:not(:disabled),
 html.les-theme-black .les-buttons-bar .les-sv-reference-btn:hover:not(:disabled),
 html.les-theme-dark .les-buttons-bar .lekolar-compliance-btn:hover,
-html.les-theme-black .les-buttons-bar .lekolar-compliance-btn:hover {
+html.les-theme-black .les-buttons-bar .lekolar-compliance-btn:hover,
+html.les-theme-dark .les-buttons-bar .les-mediahub-btn:hover,
+html.les-theme-black .les-buttons-bar .les-mediahub-btn:hover {
     background: #1f2937 !important;
     color: #f8fafc !important;
     border-color: #475569 !important;

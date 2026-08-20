@@ -6658,6 +6658,72 @@ function findAndInject() {
         if (staleBtn) staleBtn.remove();
     }
 
+    // 4b. Inject Mediahub Image Bank Button (product pages only)
+    if (!isListPage()) {
+        const mainProductNumber = getMainProductNumber();
+        const baseNumber = extractBaseItemNumber(mainProductNumber);
+        if (baseNumber) {
+            const mediahubUrl = `https://mediahub.lekolar.com/?freetext=${encodeURIComponent(baseNumber)}`;
+
+            let btn = document.querySelector('.les-mediahub-btn');
+            if (!btn) {
+                btn = document.createElement('a');
+                btn.className = 'les-mediahub-btn';
+                btn.target = '_blank';
+                btn.rel = 'noopener noreferrer';
+
+                const svgNS = 'http://www.w3.org/2000/svg';
+                const svg = document.createElementNS(svgNS, 'svg');
+                svg.setAttribute('width', '14');
+                svg.setAttribute('height', '14');
+                svg.setAttribute('viewBox', '0 0 24 24');
+                svg.setAttribute('fill', 'none');
+                svg.setAttribute('stroke', 'currentColor');
+                svg.setAttribute('stroke-width', '2');
+                svg.setAttribute('stroke-linecap', 'round');
+                svg.setAttribute('stroke-linejoin', 'round');
+                const frame = document.createElementNS(svgNS, 'rect');
+                frame.setAttribute('x', '3');
+                frame.setAttribute('y', '3');
+                frame.setAttribute('width', '18');
+                frame.setAttribute('height', '18');
+                frame.setAttribute('rx', '2');
+                const sun = document.createElementNS(svgNS, 'circle');
+                sun.setAttribute('cx', '8.5');
+                sun.setAttribute('cy', '8.5');
+                sun.setAttribute('r', '1.5');
+                const hills = document.createElementNS(svgNS, 'path');
+                hills.setAttribute('d', 'M21 15l-5-5L5 21');
+                svg.appendChild(frame);
+                svg.appendChild(sun);
+                svg.appendChild(hills);
+
+                const label = document.createElement('span');
+                label.className = 'les-mediahub-label';
+                label.textContent = 'Search in Mediahub';
+
+                btn.appendChild(svg);
+                btn.appendChild(label);
+            }
+
+            // Always refresh URL/title in case of SPA navigation between product pages.
+            btn.href = mediahubUrl;
+            btn.title = `Search ${baseNumber} in Mediahub`;
+            btn.setAttribute('aria-label', `Search ${baseNumber} in Mediahub`);
+
+            const buttonsBar = ensureProductActionBar();
+            if (buttonsBar && btn.parentElement !== buttonsBar) {
+                buttonsBar.appendChild(btn);
+            }
+        } else {
+            const staleBtn = document.querySelector('.les-mediahub-btn');
+            if (staleBtn) staleBtn.remove();
+        }
+    } else {
+        const staleBtn = document.querySelector('.les-mediahub-btn');
+        if (staleBtn) staleBtn.remove();
+    }
+
     // 5. Inject Spec Search (checkboxes + links on spec rows)
     injectSpecSearch();
 }

@@ -1,5 +1,9 @@
 # What's new
 
+## v1.35 - 2026-08-19
+
+- **Search in Mediahub** button added to the product-page action bar. It opens the internal Mediahub image bank pre-filtered by the product's item number, so product and environment photos are one click away, next to the existing SharePoint search button.
+
 ## v1.34 - 2026-08-11
 
 - Product-page number copy now preserves alphanumeric variant suffixes from the selected article number, such as `30763-609U96`, instead of truncating at `30763-609`.

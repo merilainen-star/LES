@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Lekolar Enhancer is a Manifest V3 browser extension for Firefox and Microsoft Edge. It improves internal productivity on the Lekolar e-commerce sites (lekolar.fi, lekolar.se, lekolar.dk, lekolar.no) with copy tools, browsing helpers, SharePoint search, optional AI Search, and optional source-text translation.
+Lekolar Enhancer is a Manifest V3 browser extension for Firefox and Microsoft Edge. It improves internal productivity on the Lekolar e-commerce sites (lekolar.fi, lekolar.se, lekolar.dk, lekolar.no) with copy tools, browsing helpers, SharePoint and Mediahub search, optional AI Search, and optional source-text translation.
 
 ## Popup Menu Rule
 
@@ -91,10 +91,11 @@ The extension injects utility buttons directly into the product page DOM to faci
 - **Variant handling**: On card hover, missing or configured item numbers are resolved from the linked product page and reused by the copy button.
 - **Copy shortcut**: Click the card copy button to copy the item number; configured modifier-key copy formats, including copy-as-link formats, work the same way as product-page copy buttons so results can be shared without opening the product page.
 
-**11. Omnibox and SharePoint Search**
+**11. Omnibox, SharePoint, and Mediahub Search**
 
 - **Omnibox keyword**: Type `l` in the browser address bar to search Lekolar products.
 - **SharePoint**: Optional SharePoint search helpers use the declared `lekolarab.sharepoint.com` host permission.
+- **Mediahub**: The product-page action bar includes a **Search in Mediahub** button that opens `https://mediahub.lekolar.com/?freetext=<item number>` in a new tab, pre-searching the internal image bank for the product's base item number (product and environment photos). It is a plain link, so it needs no extra host permission.
 
 **12. AI Search and Swedish Source Translation**
 
