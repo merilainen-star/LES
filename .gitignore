@@ -20,3 +20,8 @@ tools/
 
 # Locally-built Edge extension zip (pre-push hook rebuilds it; CI publishes its own)
 edge-extension.zip
+
+# Dev artifacts that must never be staged (see .agents/rules.md) — committing these
+# nested repos creates bogus gitlinks that break CI's git submodule cleanup
+.claude/worktrees/
+_push_image_copy/
