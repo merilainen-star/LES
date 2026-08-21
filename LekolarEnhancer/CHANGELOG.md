@@ -1,5 +1,10 @@
 # What's new
 
+## v1.36 - 2026-08-21
+
+- **AI Search works with newer OpenAI models** such as `gpt-5.5` and the `o`-series. Those models accept only their default sampling settings, so the request no longer sends `temperature` for them, and any optional parameter a model rejects is dropped before a single automatic retry. The **Test key** button uses the same request path, so it stops failing too.
+- **Provider settings layout fix** — the **Remove** key button no longer overflows the card in Firefox, and the API key field now spans the row with a compact **Save** button beside it.
+
 ## v1.35 - 2026-08-19
 
 - **Search in Mediahub** button added to the product-page action bar. It opens the internal Mediahub image bank pre-filtered by the product's item number, so product and environment photos are one click away, next to the existing SharePoint search button.

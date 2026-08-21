@@ -41,27 +41,62 @@ function lesAiParseJsonStrict(text) {
     }
 }
 
+// Newer OpenAI models (o-series, gpt-5*) reject sampling params: temperature
+// only accepts its default. Skip it for those families, and if a 400 still
+// names an optional param we sent, drop that param and retry once so a future
+// model family doesn't break AI Search again.
+const LES_AI_OPENAI_FIXED_SAMPLING_RE = /^(o\d|gpt-5)/i;
+const LES_AI_OPENAI_OPTIONAL_PARAMS = new Set([
+    'temperature', 'top_p', 'response_format', 'max_tokens', 'max_completion_tokens'
+]);
+
+function lesAiUnsupportedParam(status, body) {
+    if (status !== 400) return null;
+    try {
+        const parsed = JSON.parse(body);
+        const param = parsed && parsed.error && parsed.error.param;
+        if (typeof param === 'string' && LES_AI_OPENAI_OPTIONAL_PARAMS.has(param)) return param;
+    } catch (_) {
+        // Non-JSON error body — nothing to strip.
+    }
+    return null;
+}
+
 async function lesAiCallOpenAI({ userText, systemPrompt, apiKey, model }) {
-    const response = await lesAiFetchWithTimeout(LES_AI_ENDPOINTS.openai, {
+    const chosen = model || LES_AI_DEFAULT_MODELS.openai;
+    const body = {
+        model: chosen,
+        response_format: { type: 'json_object' },
+        messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userText }
+        ]
+    };
+    if (!LES_AI_OPENAI_FIXED_SAMPLING_RE.test(chosen)) {
+        body.temperature = 0;
+    }
+
+    const send = () => lesAiFetchWithTimeout(LES_AI_ENDPOINTS.openai, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${apiKey}`
         },
-        body: JSON.stringify({
-            model: model || LES_AI_DEFAULT_MODELS.openai,
-            temperature: 0,
-            response_format: { type: 'json_object' },
-            messages: [
-                { role: 'system', content: systemPrompt },
-                { role: 'user', content: userText }
-            ]
-        })
+        body: JSON.stringify(body)
     });
 
+    let response = await send();
     if (!response.ok) {
-        const body = await response.text().catch(() => '');
-        throw new Error(`openai_http_${response.status}:${body.slice(0, 200)}`);
+        let text = await response.text().catch(() => '');
+        const unsupported = lesAiUnsupportedParam(response.status, text);
+        if (unsupported && Object.prototype.hasOwnProperty.call(body, unsupported)) {
+            delete body[unsupported];
+            response = await send();
+            if (!response.ok) text = await response.text().catch(() => '');
+        }
+        if (!response.ok) {
+            throw new Error(`openai_http_${response.status}:${text.slice(0, 200)}`);
+        }
     }
     const payload = await response.json();
     const content = payload && payload.choices && payload.choices[0]

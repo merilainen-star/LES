@@ -727,6 +727,16 @@ body.layout-dragging {
 }
 
 .provider-block .key-input:focus { border-color: #89b4fa; }
+/* Save sits next to the key field: size it to its label so .key-input (flex:1)
+   keeps the rest of the row. Without width:auto it inherits width:100% from
+   .primary-btn (popup.css) and starves the input. */
+.provider-block .key-row .primary-btn {
+    flex: 0 0 auto;
+    width: auto;
+    min-width: 96px;
+    margin-top: 0;
+}
+
 
 .provider-block .key-meta { margin-bottom: 8px; }
 
@@ -738,7 +748,10 @@ body.layout-dragging {
 }
 
 .provider-block .key-actions .primary-btn {
-    flex: 0 0 auto;
+    /* flex-basis 0 — otherwise each button inherits width:100% from
+       .primary-btn (popup.css) and the second one overflows the card. */
+    flex: 1;
+    min-width: 0;
     margin-top: 0;
 }
 

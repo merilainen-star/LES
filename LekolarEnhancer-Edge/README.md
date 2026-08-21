@@ -102,6 +102,7 @@ The extension injects utility buttons directly into the product page DOM to faci
 - **AI Search**: Optional beta feature that sends the typed query only to the selected AI provider after the user enables external services consent.
 - **Translation**: Optional helper that sends selected/source text to MyMemory only after the user enables external services consent.
 - **API keys**: Stored encrypted in local extension storage and omitted from settings backup/export files.
+- **Model override**: Each provider card takes an optional model name; empty means the provider default. Models that accept only their default sampling settings (OpenAI `gpt-5*` and `o`-series) are detected by name, and any optional request parameter a provider rejects is dropped before one automatic retry.
 
 **13. Configurable Copy Formats**
 
